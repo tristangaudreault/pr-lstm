@@ -5,15 +5,16 @@ build-backend = "hatchling.build"
 [project]
 name = "thesis"
 version = "0.0.1"
+dependencies = ["dm-haiku"]
 authors = [
-  { name="Tristan Gaudreault", email="tristan@tristangaudreault.com" },
+  { name = "Tristan Gaudreault", email = "tristan@tristangaudreault.com" },
 ]
 description = "The collection of source code used in my thesis"
 readme = "README.md"
 requires-python = ">=3.8"
 classifiers = [
-    "Programming Language :: Python :: 3",
-    "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Operating System :: OS Independent",
 ]
 license = "MIT"
 license-files = ["LICEN[CS]E*"]
