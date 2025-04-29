@@ -21,15 +21,8 @@ class HaikuModel(ModelABC, hk.RNNCore):
         ModelABC.__init__(self, hidden_size, num_heads, num_branches)
         hk.RNNCore.__init__(self, name=name)
 
-        self.rnn_cell = hk.GRU(hidden_size=hidden_size)
-
-        self.multihead_attn = hk.MultiHeadAttention(
-            num_heads=num_heads,
-            key_size=hidden_size // num_heads,
-            w_init=hk.initializers.VarianceScaling(
-                scale=1.0, mode="fan_avg", distribution="uniform"
-            ),
-        )
+        self.rnn_cell_1 = hk.GRU(hidden_size=hidden_size)
+        self.rnn_cell_2 = hk.GRU(hidden_size=hidden_size)
 
     def __call__(self, x, hx):
         batch_size, seq_length, embed_dim = x.shape
@@ -50,26 +43,24 @@ class HaikuModel(ModelABC, hk.RNNCore):
             ),
         )
         x = jnp.transpose(x, (1, 0, 2))
+        hx_1, hx_2 = hx
 
         # Process the input
-        outputs = []
         for t in range(branch_length):
             x_t = x[t]
-            _, hx = self.rnn_cell(x_t, hx)
-            outputs.append(hx)
+            _, hx_1 = self.rnn_cell_1(x_t, hx_1)
+        hx_1 = jnp.reshape(hx_1, (batch_size, self.num_branches, self.hidden_size))
 
-            hx = jnp.reshape(hx, (batch_size, self.num_branches, self.hidden_size))
-            hx = self.multihead_attn(hx, hx, hx)
-            hx = jnp.reshape(hx, (batch_size * self.num_branches, self.hidden_size))
+        for i in range(self.num_branches):
+            x_i = hx_1[:, i, :]
+            _, hx_2 = self.rnn_cell_2(x_i, hx_2)
 
         # Reconstruct the output
-        outputs = jnp.stack(outputs, axis=2)
-        outputs = jnp.reshape(
-            outputs, (batch_size, self.num_branches * branch_length, self.hidden_size)
-        )
-        outputs = outputs[:, :seq_length, :]
+        hx_2 = jnp.expand_dims(hx_2, axis=1)
 
-        return outputs, hx
+        return hx_2
 
     def initial_state(self, batch_size):
-        return self.rnn_cell.initial_state(batch_size * self.num_branches)
+        return self.rnn_cell_1.initial_state(
+            batch_size * self.num_branches
+        ), self.rnn_cell_2.initial_state(batch_size)

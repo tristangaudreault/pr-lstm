@@ -9,6 +9,7 @@ from neural_networks_chomsky_hierarchy.models import rnn, tape_rnn
 from absl import app
 from absl import logging
 import haiku as hk
+import jax
 import jax.nn as jnn
 import jax.numpy as jnp
 
@@ -57,13 +58,13 @@ def make_chorus(
 
         x = hk.Flatten(preserve_dims=2)(x)
 
-        output, _ = core(x, initial_state)
-        output = jnp.reshape(output, (batch_size, new_seq_length, output.shape[-1]))
+        output = core(x, initial_state)
 
         if not return_all_outputs:
             output = output[:, -1, :]  # (batch, time, alphabet_dim)
         output = jnn.relu(output)
-        return hk.Linear(output_size)(output)
+        output = hk.Linear(output_size)(output)
+        return output
 
     return rnn_model
 
