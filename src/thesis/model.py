@@ -11,17 +11,12 @@ import haiku as hk
 logger = logging.getLogger(__name__)
 
 
-class ModelABC(ABC):
-    def __init__(self, hidden_size, num_heads, num_branches):
+class ChorusRNN(hk.RNNCore):
+    def __init__(self, hidden_size, num_branches, name=None):
+        super().__init__(name=name)
+
         self.hidden_size = hidden_size
-        self.num_heads = num_heads
         self.num_branches = num_branches
-
-
-class ChorusRNN(ModelABC, hk.RNNCore):
-    def __init__(self, hidden_size, num_heads, num_branches, name=None, **_):
-        ModelABC.__init__(self, hidden_size, num_heads, num_branches)
-        hk.RNNCore.__init__(self, name=name)
 
         self.rnn_cell_1 = hk.GRU(hidden_size=hidden_size)
         self.rnn_cell_2 = hk.GRU(hidden_size=hidden_size)
@@ -44,9 +39,6 @@ class ChorusRNN(ModelABC, hk.RNNCore):
         )
         x = jnp.transpose(x, (1, 0, 2))
 
-        if batch_size == 1:
-            jax.debug.print("Input: {}", x)
-
         # Process
         outputs = [[], []]
 
@@ -65,9 +57,6 @@ class ChorusRNN(ModelABC, hk.RNNCore):
 
         # Reconstruct the output
         hx = jnp.expand_dims(hx, axis=1)
-
-        if batch_size == 1:
-            jax.debug.print("Output: {}", outputs)
 
         return hx
 

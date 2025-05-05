@@ -3,6 +3,7 @@ import sys
 from typing import Any, Callable
 import logging
 import argparse
+import pickle
 
 import haiku as hk
 import jax
@@ -10,6 +11,8 @@ import jax.nn as jnn
 import jax.numpy as jnp
 import numpy as np
 import matplotlib.pyplot as plt
+import pandas as pd
+from filelock import Timeout, FileLock
 
 import thesis
 
@@ -23,52 +26,64 @@ from neural_networks_chomsky_hierarchy.experiments import curriculum as curricul
 from neural_networks_chomsky_hierarchy.models import rnn, tape_rnn
 
 
+ARCHITECTURE_PARAMETERS = ["hidden_size", "memory_cell_size", "memory_size"]
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Training configuration")
 
+    # Script control
+    parser.add_argument(
+        "--log-level",
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        help="level of logging",
+    )
+    parser.add_argument("-i", "--input", help="path to input file")
+    parser.add_argument("-o", "--output", help="path to output file")
+    parser.add_argument("--plot", action="store_true", help="display result plot")
+
+    # Task parameters
     parser.add_argument(
         "--batch-size",
         type=int,
         default=128,
-        help="Training batch size.",
+        help="number of samples in each training batch",
     )
-
     parser.add_argument(
         "--sequence-length",
         type=int,
         default=40,
-        help="Maximum training sequence length.",
+        help="maximum length of training sequences",
     )
-
     parser.add_argument(
         "--task",
         type=str,
         default="even_pairs",
-        help="Length generalization task (see `constants.py` for other tasks).",
+        help="length generalization task (see `constants.py` for options)",
     )
-
     parser.add_argument(
         "--architecture",
         type=str,
         default="tape_rnn",
-        help="Model architecture (see `constants.py` for other architectures).",
+        help="model architecture (see `constants.py` for options)",
     )
-
     parser.add_argument(
         "--autoregressive",
         action="store_true",
-        help="Whether to use autoregressive sampling or not.",
+        help="use autoregressive sampling",
     )
-
     parser.add_argument(
         "--computation-steps-mult",
         type=int,
         default=0,
-        help=(
-            "The amount of computation tokens to append to the input tape (defined "
-            "as a multiple of the input length)"
-        ),
+        help=("number of computation tokens to append (as multiple of input length)"),
     )
+
+    # Architecture parameters
+    for parameter in ARCHITECTURE_PARAMETERS:
+        parameter = parameter.replace("_", "-")
+        parser.add_argument(f"--{parameter}", type=int, help="architecture parameter")
 
     return parser.parse_args()
 
@@ -127,15 +142,6 @@ def make_chorus(
     return chorus_model
 
 
-# The architecture parameters depend on the architecture, so we cannot define
-# them as via flags. See `constants.py` for the required values.
-_ARCHITECTURE_PARAMS = {
-    "hidden_size": 256,
-    "memory_cell_size": 8,
-    "memory_size": 40,
-}
-
-
 def main(args) -> None:
     # Create the task.
     curriculum = curriculum_lib.UniformCurriculum(
@@ -145,10 +151,16 @@ def main(args) -> None:
 
     # Create the model.
     single_output = task.output_length(10) == 1
+    architecture_parameters = {
+        k: v
+        for k, v in vars(args).items()
+        if k in ARCHITECTURE_PARAMETERS and v is not None
+    }
+    print(architecture_parameters)
     model = constants.MODEL_BUILDERS[args.architecture](
         output_size=task.output_size,
         return_all_outputs=True,
-        **_ARCHITECTURE_PARAMS,
+        **architecture_parameters,
     )
     if args.autoregressive:
         if "transformer" not in args.architecture:
@@ -204,26 +216,60 @@ def main(args) -> None:
 
 if __name__ == "__main__":
     args = parse_args()
+    logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO))
 
-    logging.basicConfig(level=logging.INFO)
+    if args.plot:
+        fig, ax = plt.subplots(figsize=(8, 5))
 
-    # Monkey patching
-    constants.MODEL_BUILDERS["chorus"] = functools.partial(
-        make_chorus,
-        rnn_core=thesis.model.ChorusRNN,
-        num_heads=4,
-        num_branches=2,
-    )
-    _ARCHITECTURE_PARAMS["hidden_size"] = 16
+    if args.input:
+        results = []
+        with open(args.input, "rb") as f:
+            while True:
+                try:
+                    obj = pickle.load(f)
+                    results.append(obj)
+                except EOFError:
+                    break
+        if args.plot:
+            for result_args, train_results, eval_results in results:
+                ax.plot(
+                    eval_results["length"],
+                    eval_results["accuracy"],
+                    label=result_args.architecture,
+                )
+    else:
+        # Monkey patch
+        constants.MODEL_BUILDERS["chorus"] = functools.partial(
+            make_chorus,
+            rnn_core=thesis.model.ChorusRNN,
+            num_branches=2,
+        )
 
-    train_results, eval_results, params = main(args)
+        # Run
+        train_results, eval_results, params = main(args)
 
-    x = [result["length"] for result in eval_results]
-    y = [result["accuracy"] for result in eval_results]
+        # Analyze results
+        train_results = pd.DataFrame(train_results)
+        eval_results = pd.DataFrame(eval_results)
 
-    plt.plot(x, y, marker="o")
-    plt.xlabel("Sequence Length")
-    plt.ylabel("Evaluation Accuracy")
-    plt.title("Range Evaluation")
-    plt.grid(True)
-    plt.show()
+        # Save results
+        if args.output:
+            save_data = (args, train_results, eval_results)
+            lock = FileLock(args.output + ".lock")
+            with lock:
+                with open(args.output, "ab") as f:
+                    pickle.dump(save_data, f)
+
+        if args.plot:
+            x = [result["length"] for result in eval_results]
+            y = [result["accuracy"] for result in eval_results]
+
+            ax.plot(x, y, marker="o")
+
+    if args.plot:
+        ax.set_xlabel("Sequence Length")
+        ax.set_ylabel("Evaluation Accuracy")
+        ax.set_title("Range Evaluation")
+        ax.grid(True)
+        ax.legend()
+        plt.show()
