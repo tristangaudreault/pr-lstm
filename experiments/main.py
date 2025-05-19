@@ -1,8 +1,10 @@
-import functools
+from functools import partial
 from typing import Any, Callable
 import logging
 import argparse
 import pickle
+import tomllib
+import os
 from filelock import FileLock
 
 import haiku as hk
@@ -14,24 +16,23 @@ import pandas as pd
 
 import thesis
 
-from neural_networks_chomsky_hierarchy.experiments import (
+from neural_networks_chomsky_hierarchy.experiments import (  # type: ignore
     constants,
     training,
     utils,
 )
-from neural_networks_chomsky_hierarchy.experiments import curriculum as curriculum_lib
+from neural_networks_chomsky_hierarchy.experiments import curriculum as curriculum_lib  # type: ignore
 
 
-ARCHITECTURE_PARAMETERS = [
-    "hidden_size",
-    "memory_cell_size",
-    "memory_size",
-    "num_branches",
-    "num_heads",
-]
+def load_config():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    config_path = os.path.join(script_dir, "config.toml")
+    with open(config_path, "rb") as f:
+        config = tomllib.load(f)
+    return config
 
 
-def parse_args():
+def parse_args(config: dict[str, Any]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Training configuration")
 
     # Script control
@@ -90,7 +91,7 @@ def parse_args():
     )
 
     # Architecture parameters
-    for parameter in ARCHITECTURE_PARAMETERS:
+    for parameter in config["architecture-parameters"]:
         parameter = parameter.replace("_", "-")
         parser.add_argument(f"--{parameter}", type=int, help="architecture parameter")
 
@@ -146,7 +147,7 @@ def make_chorus(
     return chorus_model
 
 
-def main(args) -> None:
+def main(config: dict[str, Any], args: argparse.Namespace) -> None:
     # Create the task.
     curriculum = curriculum_lib.UniformCurriculum(
         values=list(range(args.min_sequence_length, args.max_sequence_length + 1))
@@ -158,7 +159,7 @@ def main(args) -> None:
     architecture_parameters = {
         k: v
         for k, v in vars(args).items()
-        if k in ARCHITECTURE_PARAMETERS and v is not None
+        if k in config["architecture-parameters"] and v is not None
     }
     model = constants.MODEL_BUILDERS[args.architecture](
         output_size=task.output_size,
@@ -218,7 +219,8 @@ def main(args) -> None:
 
 
 if __name__ == "__main__":
-    args = parse_args()
+    config = load_config()
+    args = parse_args(config)
     logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO))
 
     if args.plot:
@@ -245,7 +247,7 @@ if __name__ == "__main__":
                     {
                         k: v
                         for k, v in vars(result_args).items()
-                        if k in ARCHITECTURE_PARAMETERS
+                        if k in config.architecture_parameters
                         and k != args.label
                         and v is not None
                     }
@@ -262,13 +264,13 @@ if __name__ == "__main__":
             "chorus_transformer": thesis.models.ChorusTransformer,
         }
         for k, v in new_models.items():
-            constants.MODEL_BUILDERS[k] = functools.partial(
+            constants.MODEL_BUILDERS[k] = partial(
                 make_chorus,
                 rnn_core=v,
             )
 
         # Run
-        train_results, eval_results, params = main(args)
+        train_results, eval_results, params = main(config, args)
 
         # Analyze results
         train_results = pd.DataFrame(train_results)
