@@ -5,7 +5,14 @@ build-backend = "hatchling.build"
 [project]
 name = "thesis"
 version = "0.0.1"
-dependencies = ["dm-haiku", "matplotlib"]
+dependencies = [
+  "dm-haiku",
+  "matplotlib",
+  "filelock",
+  "jax[cuda12]",
+  "pandas",
+  "chex",
+]
 authors = [
   { name = "Tristan Gaudreault", email = "tristan@tristangaudreault.com" },
 ]
