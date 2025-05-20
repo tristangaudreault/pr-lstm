@@ -18,47 +18,36 @@ class Chorus(hk.RNNCore):
 
         self.rnn_cell = hk.GRU(hidden_size=hidden_size)
 
-    @staticmethod
-    def adapt_input(x, num_branches):
-        """Adapt the input for use by the Chorus model. Returns an array of shape (batch size, number of branches, branch Length, embedding dimension)"""
-        batch_size, seq_len, embed_dim = x.shape
-        branch_len = math.ceil(seq_len / num_branches)
-
-        required_len = num_branches * branch_len
-        if seq_len != required_len:
-            x = jnp.pad(x, ((0, 0), (0, required_len - seq_len % required_len), (0, 0)))
-
-        x = jnp.reshape(
-            x,
-            (
-                batch_size * num_branches,
-                branch_len,
-                embed_dim,
-            ),
-        )
-
-        return x.swapaxes(0, 1)
-
-    def process(self, x, h0):
-        return hk.dynamic_unroll(self.rnn_cell, x, h0)
-
-    @staticmethod
-    def adapt_output(outputs, hx, hidden_size, num_branches):
-        hx = jnp.reshape(hx, (-1, num_branches * hidden_size))
-        hx = jnp.expand_dims(hx, axis=1)
-
-        return outputs, hx
-
-    def __call__(self, x, h0):
-        adapted_x = self.adapt_input(x, self.num_branches)
-        outputs, hx = self.process(adapted_x, h0)
-
-        return self.adapt_output(outputs, hx, self.hidden_size, self.num_branches)
-
     def initial_state(self, batch_size):
         return jnp.repeat(
             self.rnn_cell.initial_state(batch_size), self.num_branches, axis=0
         )
+
+    @staticmethod
+    def adapt_input(x, num_branches):
+        """Adapt the input for use by the Chorus model. Returns an array of shape (batch size, number of branches, branch Length, embedding dimension)"""
+        batch_size, seq_len, embed_dim = x.shape
+
+        branch_len = -(-seq_len // num_branches)
+
+        required_len = num_branches * branch_len
+        pad_len = required_len - seq_len
+
+        x = jnp.pad(x, ((0, 0), (0, pad_len), (0, 0))) if pad_len > 0 else x
+
+        x = x.reshape(batch_size, num_branches, branch_len, embed_dim)
+        x = x.transpose(2, 0, 1, 3).reshape(
+            branch_len, batch_size * num_branches, embed_dim
+        )
+
+        return x
+
+    def process(self, x, h0):
+        outputs, hx = hk.dynamic_unroll(self.rnn_cell, x, h0)
+        return hx
+
+    def __call__(self, x, h0):
+        return self.process(self.adapt_input(x, self.num_branches), h0)
 
 
 class ChorusRNN(Chorus):
@@ -68,14 +57,12 @@ class ChorusRNN(Chorus):
         self.composer = hk.GRU(hidden_size=hidden_size)
 
     def process(self, x, h0):
-        _, branch_hxs = super().process(x, h0[0])
+        branch_hxs = super().process(x, h0[0])
         branch_hxs = jnp.reshape(branch_hxs, (-1, self.num_branches, self.hidden_size))
-
-        return hk.dynamic_unroll(self.composer, branch_hxs, h0[1], time_major=False)
-
-    @staticmethod
-    def adapt_output(outputs, hx, hidden_size, num_branches):
-        return outputs, jnp.expand_dims(hx, axis=1)
+        outputs, hx = hk.dynamic_unroll(
+            self.composer, branch_hxs, h0[1], time_major=False
+        )
+        return hx
 
     def initial_state(self, batch_size):
         return super().initial_state(batch_size), self.composer.initial_state(
@@ -103,35 +90,27 @@ class ChorusAttn(Chorus):
 
             return hx, output
 
-        hx, outputs = hk.scan(f, h0, x)
-
-        return outputs, hx
+        return hk.scan(f, h0, x)
 
 
 class ChorusTransformer(Chorus):
     def __init__(self, hidden_size, num_branches, name=None):
         super().__init__(hidden_size, num_branches, name=name)
 
-        config = transformer.TransformerConfig(
-            output_size=hidden_size,
+        self.transformer = transformer.make_transformer_encoder(
+            output_size=2,
             embedding_dim=hidden_size,
             num_layers=1,
             num_heads=4,
             num_hiddens_per_head=None,
             use_embeddings=False,
+            return_all_outputs=True,
         )
-        self.transformerEncoder = transformer.TransformerEncoder(config)
 
     def process(self, x, h0):
-        def f(hx, xt):
-            output, hx = self.rnn_cell(xt, hx)
+        hx = super().process(x, h0)
+        hx = jnp.reshape(hx, (-1, self.num_branches, self.hidden_size))
+        hx = self.transformer(hx)
+        hx = jnp.mean(hx, axis=1)
 
-            hx = jnp.reshape(hx, (-1, self.num_branches, self.hidden_size))
-            hx = self.transformerEncoder(hx)
-            hx = jnp.reshape(hx, (-1, self.hidden_size))
-
-            return hx, output
-
-        hx, outputs = hk.scan(f, h0, x)
-
-        return outputs, hx
+        return hx

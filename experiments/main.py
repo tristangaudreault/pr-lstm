@@ -8,6 +8,7 @@ import os
 from filelock import FileLock
 
 import haiku as hk
+import jax
 import jax.nn as jnn
 import jax.numpy as jnp
 import numpy as np
@@ -38,7 +39,7 @@ def parse_args(config: dict[str, Any]) -> argparse.Namespace:
     # Script control
     parser.add_argument(
         "--log-level",
-        default="INFO",
+        default="WARNING",
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         help="level of logging",
     )
@@ -120,27 +121,15 @@ def make_chorus(
     """
 
     def chorus_model(x: jnp.ndarray, input_length: int = 1) -> jnp.ndarray:
+        batch_size = x.shape[0]
         core = rnn_core(**rnn_kwargs)
-        initial_state = core.initial_state(x.shape[0])
+        initial_state = core.initial_state(batch_size)
 
-        batch_size, seq_length, embed_size = x.shape
-        if seq_length % input_window != 0:
-            x = jnp.pad(
-                x, ((0, 0), (0, input_window - seq_length % input_window), (0, 0))
-            )
-        new_seq_length = x.shape[1]
-        x = jnp.reshape(
-            x, (batch_size, new_seq_length // input_window, input_window, embed_size)
-        )
-
-        x = hk.Flatten(preserve_dims=2)(x)
-
-        _, output = core(x, initial_state)
-
-        if not return_all_outputs:
-            output = output[:, -1, :]  # (batch, time, alphabet_dim)
+        output = core(x, initial_state)
+        output = jnp.reshape(output, (batch_size, -1))
         output = jnn.relu(output)
         output = hk.Linear(output_size)(output)
+        output = jnp.expand_dims(output, axis=1)
 
         return output
 
@@ -212,7 +201,8 @@ def main(config: dict[str, Any], args: argparse.Namespace) -> None:
 
     # Gather results and print final score.
     accuracies = [r["accuracy"] for r in eval_results]
-    score = np.mean(accuracies[args.max_sequence_length + 1 :])
+    print(accuracies)
+    score = np.mean(accuracies)
     print(f"Network score: {score}")
 
     return train_results, eval_results, params

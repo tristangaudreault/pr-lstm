@@ -22,17 +22,3 @@ def test_adapt_input():
     )
 
     np.testing.assert_array_equal(adapted_x, expected_adapted_x)
-
-
-def test_adapt_output():
-    hx = jnp.array(
-        [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0], [9.0, 10.0], [11.0, 12.0]]
-    )
-
-    adapted_hx = model.Chorus.adapt_output(None, hx, 2, 3)[1]
-
-    expected_adapted_hx = jnp.array(
-        [[[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]], [[7.0, 8.0, 9.0, 10.0, 11.0, 12.0]]]
-    )
-
-    np.testing.assert_array_equal(adapted_hx, expected_adapted_hx)
