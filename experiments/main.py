@@ -201,7 +201,9 @@ def main(config: dict[str, Any], args: argparse.Namespace) -> None:
 
     # Gather results and print final score.
     accuracies = [r["accuracy"] for r in eval_results]
-    print(accuracies)
+    print("Sequence Length: Test Accuracy")
+    for i, accuracy in enumerate(accuracies):
+        print(f"{i}: {accuracy.item()}")
     score = np.mean(accuracies)
     print(f"Network score: {score}")
 
