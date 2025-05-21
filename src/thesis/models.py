@@ -4,7 +4,7 @@ import logging
 import jax.numpy as jnp
 import haiku as hk
 
-from neural_networks_chomsky_hierarchy.models import transformer
+from neural_networks_chomsky_hierarchy.models import transformer # type: ignore
 
 logger = logging.getLogger(__name__)
 
