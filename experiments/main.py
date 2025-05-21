@@ -25,7 +25,7 @@ from neural_networks_chomsky_hierarchy.experiments import (  # type: ignore
 from neural_networks_chomsky_hierarchy.experiments import curriculum as curriculum_lib  # type: ignore
 
 
-def load_config():
+def load_config() -> dict[str, Any]:
     script_dir = os.path.dirname(os.path.abspath(__file__))
     config_path = os.path.join(script_dir, "config.toml")
     with open(config_path, "rb") as f:
