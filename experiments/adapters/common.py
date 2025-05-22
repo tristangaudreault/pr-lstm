@@ -17,7 +17,6 @@ def wandb_log_wrapper(
 
         if iterations % frequency == 0:
             log_data = log_data_adapter(result)
-            log_data["step"] = iterations
             wandb_run.log(log_data)
 
         iterations += 1

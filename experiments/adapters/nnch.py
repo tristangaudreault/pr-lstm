@@ -139,8 +139,8 @@ def run(
 
     # Gather results and print final score.
     accuracies = [r["accuracy"] for r in eval_results]
-    for i, accuracy in enumerate(accuracies, 1):
-        log_data = {"sequence_length": i, "test/accuracy": accuracy.item()}
+    for seq_len, accuracy in enumerate(accuracies, 1):
+        log_data = {"sequence_length": seq_len, "test/accuracy": accuracy.item()}
         wandb_run.log(log_data)
 
     return train_results, eval_results, params
