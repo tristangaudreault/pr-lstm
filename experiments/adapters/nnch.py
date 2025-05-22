@@ -1,4 +1,4 @@
-import argparse
+import inspect
 from functools import partial
 from typing import Any
 
@@ -18,6 +18,7 @@ import haiku as hk
 import jax.nn as jnn
 import jax.numpy as jnp
 import numpy as np
+
 
 def make_chorus(
     output_size: int,
@@ -67,34 +68,37 @@ def register_custom_models(model_builders: dict[str, Callable]):
         model_builders[name] = partial(make_chorus, rnn_core=model_class)
 
 
-def run(config: dict[str, Any], args: argparse.Namespace) -> None:
+def run(wandb_run) -> None:
     # Create the task.
     curriculum = curriculum_lib.UniformCurriculum(
-        values=list(range(args.min_sequence_length, args.max_sequence_length + 1))
+        values=list(
+            range(wandb_run.config["min_length"], wandb_run.config["max_length"] + 1)
+        )
     )
-    task = constants.TASK_BUILDERS[args.task]()
+    task = constants.TASK_BUILDERS[wandb_run.config["task"]]()
 
     # Create the model.
     single_output = task.output_length(10) == 1
-    architecture_parameters = {
+    model_builder = constants.MODEL_BUILDERS[wandb_run.config["model"]]
+    sig = inspect.signature(model_builder.keywords.get("rnn_core"))
+    rnn_kwarg_names = [param.name for param in sig.parameters.values()]
+    rnn_kwargs = {
         k: v
-        for k, v in vars(args).items()
-        if k in config["architecture-parameters"] and v is not None
+        for k, v in wandb_run.config.items()
+        if k in rnn_kwarg_names and v is not None
     }
-    model = constants.MODEL_BUILDERS[args.architecture](
-        output_size=task.output_size,
-        return_all_outputs=True,
-        **architecture_parameters,
+    model = model_builder(
+        output_size=task.output_size, return_all_outputs=True, **rnn_kwargs
     )
-    if args.autoregressive:
-        if "transformer" not in args.architecture:
+    if wandb_run.config["autoregressive"]:
+        if "transformer" not in wandb_run.config["model"]:
             model = utils.make_model_with_targets_as_input(
-                model, args.computation_steps_mult
+                model, wandb_run.config["computation_steps_mult"]
             )
         model = utils.add_sampling_to_autoregressive_model(model, single_output)
     else:
         model = utils.make_model_with_empty_targets(
-            model, task, args.computation_steps_mult, single_output
+            model, task, wandb_run.config["computation_steps_mult"], single_output
         )
     model = hk.transform(model)
 
@@ -111,20 +115,20 @@ def run(config: dict[str, Any], args: argparse.Namespace) -> None:
     training_params = training.ClassicTrainingParams(
         seed=0,
         model_init_seed=0,
-        training_steps=10_000,
+        training_steps=wandb_run.config["training_steps"],
         log_frequency=100,
         length_curriculum=curriculum,
-        batch_size=args.batch_size,
+        batch_size=wandb_run.config["batch_size"],
         task=task,
         model=model,
         loss_fn=loss_fn,
-        learning_rate=1e-3,
+        learning_rate=wandb_run.config["learning_rate"],
         accuracy_fn=accuracy_fn,
         compute_full_range_test=True,
         max_range_test_length=100,
         range_test_total_batch_size=512,
         range_test_sub_batch_size=64,
-        is_autoregressive=args.autoregressive,
+        is_autoregressive=wandb_run.config["autoregressive"],
     )
 
     training_worker = training.TrainingWorker(training_params, use_tqdm=True)
@@ -133,9 +137,22 @@ def run(config: dict[str, Any], args: argparse.Namespace) -> None:
     # Gather results and print final score.
     accuracies = [r["accuracy"] for r in eval_results]
     print("Sequence Length: Test Accuracy")
-    for i, accuracy in enumerate(accuracies):
+    for i, accuracy in enumerate(accuracies, 1):
         print(f"{i}: {accuracy.item()}")
+        log_data = {"sequence_length": i, "test/accuracy": accuracy.item()}
+        wandb_run.log(log_data)
     score = np.mean(accuracies)
     print(f"Network score: {score}")
 
     return train_results, eval_results, params
+
+
+def log_data_adapter(return_value: Any) -> dict[str, Any]:
+    params, opt_state, (train_loss, train_metrics, train_accuracy) = return_value
+    log_data = {
+        "train/loss": float(train_loss),
+        "train/accuracy": float(train_accuracy),
+    }
+    for key, value in train_metrics.items():
+        log_data["/".join(["train/metrics", key])] = np.array(value)
+    return log_data
