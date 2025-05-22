@@ -9,9 +9,9 @@ load_dotenv()
 
 from neural_networks_chomsky_hierarchy.experiments import constants, training  # type: ignore
 
-from experiments.control import parse_args
-from experiments.adapters import nnch
-from experiments.adapters.common import wandb_log_wrapper
+from control import parse_args
+from adapters import nnch
+from adapters.common import wandb_log_wrapper
 
 
 def main():

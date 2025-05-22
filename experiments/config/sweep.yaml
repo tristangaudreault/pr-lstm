@@ -1,0 +1,18 @@
+program: experiments/main.py
+method: grid
+parameters:
+  model:
+    value: chorus_rnn
+  task:
+    value: parity_check
+  hidden-size:
+    values: [64, 128]
+  outer-hidden-size:
+    values: [64, 128]
+metric:
+  name: test/accuracy
+  goal: maximize
+command:
+  - venv/Scripts/python
+  - ${program}
+  - ${args}
