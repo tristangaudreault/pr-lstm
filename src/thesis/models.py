@@ -4,13 +4,15 @@ import logging
 import jax.numpy as jnp
 import haiku as hk
 
-from neural_networks_chomsky_hierarchy.models import transformer # type: ignore
+from neural_networks_chomsky_hierarchy.models import transformer  # type: ignore
 
 logger = logging.getLogger(__name__)
 
 
 class Chorus(hk.RNNCore):
-    def __init__(self, hidden_size: int, num_branches: int = None, name: str = None):
+    def __init__(
+        self, hidden_size: int, num_branches: int | None = None, name: str | None = None
+    ):
         super().__init__(name=name)
         self.hidden_size = hidden_size
         self.num_branches = num_branches
@@ -56,11 +58,17 @@ class Chorus(hk.RNNCore):
 
 
 class ChorusRNN(Chorus):
-    def __init__(self, hidden_size: int, num_branches: int = None, name: str = None):
+    def __init__(
+        self,
+        hidden_size: int,
+        outer_hidden_size: int,
+        num_branches: int | None = None,
+        name: str | None = None,
+    ):
         super().__init__(hidden_size, num_branches, name=name)
-        self.composer = hk.GRU(hidden_size=hidden_size)
+        self.composer = hk.GRU(hidden_size=outer_hidden_size)
 
-    def initial_state(self, batch_size: int) -> jnp.ndarray:
+    def initial_state(self, batch_size: int) -> tuple[jnp.ndarray, jnp.ndarray]:
         return super().initial_state(batch_size), self.composer.initial_state(
             batch_size
         )
@@ -77,9 +85,9 @@ class ChorusAttn(Chorus):
     def __init__(
         self,
         hidden_size: int,
-        num_branches: int = None,
+        num_branches: int | None = None,
         num_heads: int = 4,
-        name: str = None,
+        name: str | None = None,
     ):
         super().__init__(hidden_size, num_branches, name=name)
         self.multihead_attn = hk.MultiHeadAttention(
@@ -90,7 +98,9 @@ class ChorusAttn(Chorus):
             ),
         )
 
-    def process(self, x: jnp.ndarray, h0: jnp.ndarray, num_branches: int) -> jnp.ndarray:
+    def process(
+        self, x: jnp.ndarray, h0: jnp.ndarray, num_branches: int
+    ) -> jnp.ndarray:
         def f(hx, xt):
             output, hx = self.rnn_cell(xt, hx)
 
@@ -102,7 +112,9 @@ class ChorusAttn(Chorus):
 
 
 class ChorusTransformer(Chorus):
-    def __init__(self, hidden_size: int, num_branches: int = None, name: str = None):
+    def __init__(
+        self, hidden_size: int, num_branches: int | None = None, name: str | None = None
+    ):
         super().__init__(hidden_size, num_branches, name=name)
         self.transformer = transformer.make_transformer_encoder(
             output_size=2,
@@ -114,7 +126,9 @@ class ChorusTransformer(Chorus):
             return_all_outputs=True,
         )
 
-    def process(self, x: jnp.ndarray, h0: jnp.ndarray, num_branches: int) -> jnp.ndarray:
+    def process(
+        self, x: jnp.ndarray, h0: jnp.ndarray, num_branches: int
+    ) -> jnp.ndarray:
         hx = super().process(x, h0, num_branches)
         hx = jnp.reshape(hx, (-1, num_branches, self.hidden_size))
         hx = self.transformer(hx)

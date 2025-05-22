@@ -1,6 +1,6 @@
 import inspect
 from functools import partial
-from typing import Any
+from typing import Any, Mapping
 
 
 from neural_networks_chomsky_hierarchy.experiments import (  # type: ignore
@@ -18,11 +18,12 @@ import haiku as hk
 import jax.nn as jnn
 import jax.numpy as jnp
 import numpy as np
+import chex
 
 
 def make_chorus(
     output_size: int,
-    rnn_core: type[hk.RNNCore],
+    rnn_core: type[thesis.models.Chorus],
     return_all_outputs: bool = False,
     input_window: int = 1,
     **rnn_kwargs: Any,
@@ -68,7 +69,9 @@ def register_custom_models(model_builders: dict[str, Callable]):
         model_builders[name] = partial(make_chorus, rnn_core=model_class)
 
 
-def run(wandb_run) -> None:
+def run(
+    wandb_run,
+) -> tuple[list[Mapping[str, Any]], list[Mapping[str, Any]] | None, chex.ArrayTree]:
     # Create the task.
     curriculum = curriculum_lib.UniformCurriculum(
         values=list(
@@ -136,13 +139,9 @@ def run(wandb_run) -> None:
 
     # Gather results and print final score.
     accuracies = [r["accuracy"] for r in eval_results]
-    print("Sequence Length: Test Accuracy")
     for i, accuracy in enumerate(accuracies, 1):
-        print(f"{i}: {accuracy.item()}")
         log_data = {"sequence_length": i, "test/accuracy": accuracy.item()}
         wandb_run.log(log_data)
-    score = np.mean(accuracies)
-    print(f"Network score: {score}")
 
     return train_results, eval_results, params
 
@@ -153,6 +152,4 @@ def log_data_adapter(return_value: Any) -> dict[str, Any]:
         "train/loss": float(train_loss),
         "train/accuracy": float(train_accuracy),
     }
-    for key, value in train_metrics.items():
-        log_data["/".join(["train/metrics", key])] = np.array(value)
     return log_data

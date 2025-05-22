@@ -88,6 +88,10 @@ def parse_args() -> argparse.Namespace:
         type=int,
     )
     parser.add_argument(
+        "--outer-hidden-size",
+        type=int,
+    )
+    parser.add_argument(
         "--memory-cell-size",
         type=int,
     )
@@ -105,22 +109,3 @@ def parse_args() -> argparse.Namespace:
     )
 
     return parser.parse_args()
-
-
-def load_results(input_path: str):
-    results = []
-    with open(input_path, "rb") as f:
-        while True:
-            try:
-                obj = pickle.load(f)
-                results.append(obj)
-            except EOFError:
-                break
-    return results
-
-
-def save_results(output_path: str, save_data: Any):
-    lock = FileLock(output_path + ".lock")
-    with lock:
-        with open(output_path, "ab") as f:
-            pickle.dump(save_data, f)
