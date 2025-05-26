@@ -1,111 +1,34 @@
-import argparse
-import pickle
-from filelock import FileLock
-from typing import Any
+from argparse import ArgumentParser, Namespace
+
+from interface import ObjectiveAdapter
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Training configuration")
+def get_adapter_map() -> dict[str, type[ObjectiveAdapter]]:
+    return {
+        adapter.__name__.lower(): adapter
+        for adapter in ObjectiveAdapter.__subclasses__()
+    }
 
-    # Script control
+
+def parse_args(adapter_map: dict[str, type[ObjectiveAdapter]]) -> Namespace:
+    parser = ArgumentParser()
+    subparsers = parser.add_subparsers(
+        dest="adapter",
+        help="objective adapter to use for experimentation",
+    )
     parser.add_argument(
         "--log-level",
         default="WARNING",
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         help="level of logging",
     )
+    parser.add_argument("-o", "--output", help="output file path")
     parser.add_argument(
-        "framework",
-        type=str,
-        default="nnch",
-        nargs="?",
-        help="framework to use for experimentation",
-    )
-    parser.add_argument("-i", "--input", help="path to input file")
-    parser.add_argument("-o", "--output", help="path to output file")
-    parser.add_argument("--plot", action="store_true", help="display result plot")
-    parser.add_argument("--label", default="architecture", help="key of label value")
-
-    # Task parameters
-    parser.add_argument(
-        "-b",
-        "--batch-size",
-        type=int,
-        default=128,
-        help="number of samples in each training batch",
-    )
-    parser.add_argument(
-        "--training-steps", type=int, default=10_000, help="number of training steps"
-    )
-    parser.add_argument(
-        "-lr", "--learning-rate", type=float, default=1e-3, help="learning rate"
-    )
-    parser.add_argument(
-        "--min-length",
-        type=int,
-        default=1,
-        help="maximum length of training sequences",
-    )
-    parser.add_argument(
-        "--max-length",
-        type=int,
-        default=40,
-        help="maximum length of training sequences",
-    )
-    parser.add_argument(
-        "--task",
-        type=str,
-        default="even_pairs",
-        help="length generalization task (see `constants.py` for options)",
-    )
-    parser.add_argument(
-        "--model",
-        type=str,
-        default="tape_rnn",
-        help="model architecture (see `constants.py` for options)",
-    )
-    parser.add_argument(
-        "--autoregressive",
-        action="store_true",
-        help="use autoregressive sampling",
-    )
-    parser.add_argument(
-        "--computation-steps-mult",
-        type=int,
-        default=0,
-        help=("number of computation tokens to append (as multiple of input length)"),
-    )
-    parser.add_argument(
-        "--log-frequency",
-        type=int,
-        default=100,
-        help="number iterations between log entries",
+        "--optuna", nargs="*", help="parameters to optimize with optuna"
     )
 
-    # Model parameters
-    parser.add_argument(
-        "--hidden-size",
-        type=int,
-    )
-    parser.add_argument(
-        "--outer-hidden-size",
-        type=int,
-    )
-    parser.add_argument(
-        "--memory-cell-size",
-        type=int,
-    )
-    parser.add_argument(
-        "--memory-size",
-        type=int,
-    )
-    parser.add_argument(
-        "--num-branches",
-        type=int,
-    )
-    parser.add_argument(
-        "--num-heads",
-        type=int,
-    )
+    for name, adapter in adapter_map.items():
+        subparser = subparsers.add_parser(name)
+        adapter.add_arguments(subparser)
 
     return parser.parse_args()

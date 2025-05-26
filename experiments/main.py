@@ -1,37 +1,47 @@
-import os
+import sys
 import logging
+from functools import partial
+from argparse import Namespace
+from pathlib import Path
 
-import pandas as pd
-import wandb
+import optuna
 from dotenv import load_dotenv
 
 load_dotenv()
 
-from neural_networks_chomsky_hierarchy.experiments import constants, training  # type: ignore
+from control import get_adapter_map, parse_args
+from interface import ObjectiveAdapter
+import adapters
 
-from control import parse_args
-from adapters import nnch
-from adapters.common import wandb_log_wrapper
+
+def objective(trial: optuna.Trial, adapter: ObjectiveAdapter, args: Namespace) -> float:
+    for arg in args.optuna:
+        if sampler := adapter.optuna_samplers.get(arg):
+            setattr(args, arg, sampler(trial))
+
+    return adapter.run(trial, args)
 
 
 def main():
-    args = parse_args()
+    adapter_map = get_adapter_map()
+    args = parse_args(adapter_map)
+    if args.output:
+        sys.stdout = open(args.output, "w")
+        sys.stderr = sys.stdout
     logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO))
 
-    nnch.register_custom_models(constants.MODEL_BUILDERS)
+    adapter = adapter_map[args.adapter]
 
-    with wandb.init(
-        entity=os.getenv("WANDB_ENTITY"),
-        project=os.getenv("WANDB_PROJECT"),
-        config=vars(args),
-    ) as wandb_run:
-        training._update_parameters = wandb_log_wrapper(
-            training._update_parameters,
-            wandb_run,
-            wandb_run.config["log_frequency"],
-            nnch.log_data_adapter,
-        )
-        train_results, eval_results, params = nnch.run(wandb_run)
+    # Optuna
+    optuna_path = Path("results/optuna")
+    study_name = "test"
+    storage_name = f"sqlite:///{optuna_path / "optuna_results"}.db"
+    study = optuna.create_study(
+        study_name=study_name, storage=storage_name, direction="maximize"
+    )
+    objective_func = partial(objective, adapter=adapter, args=args)  # type: ignore
+    objective_func.__name__ = "test_accuracy"  # type: ignore
+    study.optimize(objective_func, n_trials=2)
 
 
 if __name__ == "__main__":

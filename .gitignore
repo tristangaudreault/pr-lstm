@@ -181,3 +181,9 @@ cython_debug/
 
 # wandb files
 wandb/
+
+# log files
+logs/
+
+# result files
+results/

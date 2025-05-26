@@ -3,8 +3,13 @@
 ## Usage
 To run the external experiments, their folder first needs to be added to the `PYTHONPATH`:
 #### Windows
+With PowerShell
 ```powershell
 $env:PYTHONPATH = "external"
+```
+or with Command Prompt
+```cmd
+set PYTHONPATH=external
 ```
 #### Linux/Unix
 ```shell
