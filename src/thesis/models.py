@@ -24,7 +24,7 @@ class Chorus(hk.RNNCore):
 
     def get_num_branches(self, seq_len: int):
         return (
-            self.num_branches if self.num_branches else math.floor(math.sqrt(seq_len))
+            self.num_branches if self.num_branches else math.ceil(math.sqrt(seq_len))
         )
 
     @staticmethod
