@@ -1,0 +1,63 @@
+wandb: WARNING Using legacy-service, which is deprecated. If this is unintentional, you can fix it by ensuring you do not call `wandb.require('legacy-service')` and do not set the WANDB_X_REQUIRE_LEGACY_SERVICE environment variable.
+wandb: Starting wandb agent 🕵️
+2025-05-27 01:02:10,269 - wandb.wandb_agent - INFO - Running runs: []
+2025-05-27 01:02:10,506 - wandb.wandb_agent - INFO - Agent received command: run
+2025-05-27 01:02:10,506 - wandb.wandb_agent - INFO - Agent starting run with config:
+	hidden-size: 256
+	max-test-length: 500
+	model: chorus_rnn
+	outer-hidden-size: 128
+	task: modular_arithmetic
+	training-steps: 1000000
+2025-05-27 01:02:10,512 - wandb.wandb_agent - INFO - About to run command: python experiments/main.py --wandb nnch --hidden-size=256 --max-test-length=500 --model=chorus_rnn --outer-hidden-size=128 --task=modular_arithmetic --training-steps=1000000 --no-tqdm
+wandb: WARNING Using legacy-service, which is deprecated. If this is unintentional, you can fix it by ensuring you do not call `wandb.require('legacy-service')` and do not set the WANDB_X_REQUIRE_LEGACY_SERVICE environment variable.
+wandb: Currently logged in as: tristangaudreault (tristangaudreault-thesis) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+wandb: WARNING Ignoring project 'thesis-experiments' when running a sweep.
+wandb: WARNING Ignoring entity 'tristangaudreault-thesis' when running a sweep.
+wandb: Tracking run with wandb version 0.19.11
+wandb: Run data is saved locally in /mnt/c/Users/Tristan/projects/thesis/wandb/run-20250527_010213-dxi8kmsx
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run amber-sweep-1
+wandb: ⭐️ View project at https://wandb.ai/tristangaudreault-thesis/thesis-experiments
+wandb: 🧹 View sweep at https://wandb.ai/tristangaudreault-thesis/thesis-experiments/sweeps/5b2gprcx
+wandb: 🚀 View run at https://wandb.ai/tristangaudreault-thesis/thesis-experiments/runs/dxi8kmsx
+2025-05-27 01:02:15,523 - wandb.wandb_agent - INFO - Running runs: ['dxi8kmsx']
+wandb: WARNING Using legacy-service, which is deprecated. If this is unintentional, you can fix it by ensuring you do not call `wandb.require('legacy-service')` and do not set the WANDB_X_REQUIRE_LEGACY_SERVICE environment variable.
+wandb: Starting wandb agent 🕵️
+2025-05-27 01:04:40,307 - wandb.wandb_agent - INFO - Running runs: []
+2025-05-27 01:04:40,504 - wandb.wandb_agent - INFO - Agent received command: run
+2025-05-27 01:04:40,504 - wandb.wandb_agent - INFO - Agent starting run with config:
+	hidden-size: 256
+	log-frequency: 1000
+	max-test-length: 500
+	model: chorus_rnn
+	outer-hidden-size: 128
+	task: modular_arithmetic
+	training-steps: 1000000
+2025-05-27 01:04:40,507 - wandb.wandb_agent - INFO - About to run command: python experiments/main.py --wandb nnch --hidden-size=256 --log-frequency=1000 --max-test-length=500 --model=chorus_rnn --outer-hidden-size=128 --task=modular_arithmetic --training-steps=1000000 --no-tqdm
+wandb: WARNING Using legacy-service, which is deprecated. If this is unintentional, you can fix it by ensuring you do not call `wandb.require('legacy-service')` and do not set the WANDB_X_REQUIRE_LEGACY_SERVICE environment variable.
+wandb: Currently logged in as: tristangaudreault (tristangaudreault-thesis) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+wandb: WARNING Ignoring project 'thesis-experiments' when running a sweep.
+wandb: WARNING Ignoring entity 'tristangaudreault-thesis' when running a sweep.
+wandb: Tracking run with wandb version 0.19.11
+wandb: Run data is saved locally in /mnt/c/Users/Tristan/projects/thesis/wandb/run-20250527_010444-d3l5n196
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run wild-sweep-1
+wandb: ⭐️ View project at https://wandb.ai/tristangaudreault-thesis/thesis-experiments
+wandb: 🧹 View sweep at https://wandb.ai/tristangaudreault-thesis/thesis-experiments/sweeps/m7qhz6my
+wandb: 🚀 View run at https://wandb.ai/tristangaudreault-thesis/thesis-experiments/runs/d3l5n196
+2025-05-27 01:04:45,515 - wandb.wandb_agent - INFO - Running runs: ['d3l5n196']
+wandb: ERROR Dropped streaming file chunk (see wandb/debug-internal.log)
+wandb: ERROR Dropped streaming file chunk (see wandb/debug-internal.log)
+wandb: ERROR Dropped streaming file chunk (see wandb/debug-internal.log)
+wandb: ERROR Dropped streaming file chunk (see wandb/debug-internal.log)
+wandb: ERROR Dropped streaming file chunk (see wandb/debug-internal.log)
+wandb: ERROR Dropped streaming file chunk (see wandb/debug-internal.log)
+wandb: ERROR Dropped streaming file chunk (see wandb/debug-internal.log)
+wandb: ERROR Dropped streaming file chunk (see wandb/debug-internal.log)
+wandb: ERROR Dropped streaming file chunk (see wandb/debug-internal.log)
+wandb: ERROR Dropped streaming file chunk (see wandb/debug-internal.log)
+wandb: ERROR Dropped streaming file chunk (see wandb/debug-internal.log)
+wandb: ERROR Dropped streaming file chunk (see wandb/debug-internal.log)
+wandb: ERROR Dropped streaming file chunk (see wandb/debug-internal.log)
+wandb: ERROR Dropped streaming file chunk (see wandb/debug-internal.log)

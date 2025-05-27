@@ -187,3 +187,6 @@ logs/
 
 # result files
 results/
+
+# experiment configs
+experiments/config

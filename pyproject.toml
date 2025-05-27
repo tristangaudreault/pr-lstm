@@ -14,7 +14,7 @@ dependencies = [
   "optuna",
   "dotenv",
   "plotly",
-  "unittest",
+  "wandb",
 ]
 authors = [
   { name = "Tristan Gaudreault", email = "tristan@tristangaudreault.com" },
