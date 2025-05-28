@@ -1,20 +1,20 @@
 from argparse import ArgumentParser, Namespace
 
-from interface import LearningAdapter
+from interface import ExperimentAdapter
 
 
-def get_adapter_map() -> dict[str, type[LearningAdapter]]:
+def get_adapter_map() -> dict[str, type[ExperimentAdapter]]:
     return {
         adapter.__name__.lower(): adapter
-        for adapter in LearningAdapter.__subclasses__()
+        for adapter in ExperimentAdapter.__subclasses__()
     }
 
 
-def parse_args(adapter_map: dict[str, type[LearningAdapter]]) -> Namespace:
+def parse_args(adapter_map: dict[str, type[ExperimentAdapter]]) -> Namespace:
     parser = ArgumentParser()
     subparsers = parser.add_subparsers(
         dest="adapter",
-        help="objective adapter to use for experimentation",
+        help="learning adapter to use",
     )
     parser.add_argument(
         "--log-level",
@@ -26,9 +26,6 @@ def parse_args(adapter_map: dict[str, type[LearningAdapter]]) -> Namespace:
 
     # Reporting framework
     report_framework_group = parser.add_mutually_exclusive_group()
-    report_framework_group.add_argument(
-        "--optuna", nargs="*", help="parameters to optimize with optuna"
-    )
     report_framework_group.add_argument("--wandb", action="store_true", help="enables the use of Weights and Biases")
 
     for name, adapter in adapter_map.items():

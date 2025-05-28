@@ -11,11 +11,11 @@ logger = logging.getLogger(__name__)
 
 class Chorus(hk.RNNCore):
     def __init__(
-        self, hidden_size: int, num_branches: int | None = None, name: str | None = None
+        self, hidden_size: int, max_branches: int | None = None, name: str | None = None
     ):
         super().__init__(name=name)
         self.hidden_size = hidden_size
-        self.num_branches = num_branches
+        self.max_branches = max_branches
 
         self.rnn_cell = hk.GRU(hidden_size=hidden_size)
 
@@ -23,9 +23,11 @@ class Chorus(hk.RNNCore):
         return self.rnn_cell.initial_state(batch_size)
 
     def get_num_branches(self, seq_len: int):
-        return (
-            self.num_branches if self.num_branches else math.ceil(math.sqrt(seq_len))
-        )
+        num_branches = math.ceil(math.sqrt(seq_len))
+        if self.max_branches:
+            num_branches = min(num_branches, self.max_branches)
+
+        return num_branches
 
     @staticmethod
     def adapt_input(x: jnp.ndarray, num_branches: int) -> jnp.ndarray:
@@ -62,10 +64,10 @@ class ChorusRNN(Chorus):
         self,
         hidden_size: int,
         outer_hidden_size: int,
-        num_branches: int | None = None,
+        max_branches: int | None = None,
         name: str | None = None,
     ):
-        super().__init__(hidden_size, num_branches, name=name)
+        super().__init__(hidden_size, max_branches, name=name)
         self.composer = hk.GRU(hidden_size=outer_hidden_size)
 
     def initial_state(self, batch_size: int) -> tuple[jnp.ndarray, jnp.ndarray]:
@@ -79,57 +81,3 @@ class ChorusRNN(Chorus):
         branch_hxs = super().process(x, h0[0], num_branches)
         branch_hxs = jnp.reshape(branch_hxs, (-1, num_branches, self.hidden_size))
         return hk.dynamic_unroll(self.composer, branch_hxs, h0[1], time_major=False)[1]
-
-
-class ChorusAttn(Chorus):
-    def __init__(
-        self,
-        hidden_size: int,
-        num_branches: int | None = None,
-        num_heads: int = 4,
-        name: str | None = None,
-    ):
-        super().__init__(hidden_size, num_branches, name=name)
-        self.multihead_attn = hk.MultiHeadAttention(
-            num_heads=num_heads,
-            key_size=hidden_size // num_heads,
-            w_init=hk.initializers.VarianceScaling(
-                scale=1.0, mode="fan_avg", distribution="uniform"
-            ),
-        )
-
-    def process(
-        self, x: jnp.ndarray, h0: jnp.ndarray, num_branches: int
-    ) -> jnp.ndarray:
-        def f(hx, xt):
-            output, hx = self.rnn_cell(xt, hx)
-
-            hx = self.multihead_attn(hx, hx, hx)
-
-            return hx, output
-
-        return hk.scan(f, h0, x)[0]
-
-
-class ChorusTransformer(Chorus):
-    def __init__(
-        self, hidden_size: int, num_branches: int | None = None, name: str | None = None
-    ):
-        super().__init__(hidden_size, num_branches, name=name)
-        self.transformer = transformer.make_transformer_encoder(
-            output_size=2,
-            embedding_dim=hidden_size,
-            num_layers=1,
-            num_heads=4,
-            num_hiddens_per_head=None,
-            use_embeddings=False,
-            return_all_outputs=True,
-        )
-
-    def process(
-        self, x: jnp.ndarray, h0: jnp.ndarray, num_branches: int
-    ) -> jnp.ndarray:
-        hx = super().process(x, h0, num_branches)
-        hx = jnp.reshape(hx, (-1, num_branches, self.hidden_size))
-        hx = self.transformer(hx)
-        return jnp.mean(hx, axis=1)
