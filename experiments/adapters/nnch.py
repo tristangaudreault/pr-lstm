@@ -2,6 +2,8 @@ from argparse import ArgumentParser
 import inspect
 from functools import partial, wraps
 from typing import Any, Callable
+import pickle
+from types import SimpleNamespace
 
 import haiku as hk
 import jax.nn as jnn
@@ -264,11 +266,20 @@ class NNCH(ExperimentAdapter):
             mask = task.accuracy_mask(target)
             return jnp.sum(mask * task.accuracy_fn(output, target)) / jnp.sum(mask)
 
+        if args["load_model"] is not None:
+            with open(args["load_model"], "rb") as f:
+                params = pickle.load(f)
+
+            model = SimpleNamespace(init=lambda *args: params, apply=model.apply)
+            training_steps = -1
+        else:
+            training_steps = args["training_steps"]
+
         # Create the final training parameters.
         training_params = training.ClassicTrainingParams(
             seed=0,
             model_init_seed=0,
-            training_steps=args["training_steps"],
+            training_steps=training_steps,
             log_frequency=args["log_frequency"],
             length_curriculum=curriculum,
             batch_size=args["batch_size"],

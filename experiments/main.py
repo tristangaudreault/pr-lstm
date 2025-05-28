@@ -2,10 +2,11 @@ import os
 import sys
 import logging
 from typing import Any
+import pickle
 
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(override=True)
 sys.path.append("external")
 
 from control import get_adapter_map, parse_args
@@ -25,6 +26,9 @@ def run_wandb(args: dict[str, Any], adapter: type[ExperimentAdapter]):
 
         train_results, eval_results, params = adapter.run(wandb.config, log_hook)  # type: ignore
 
+        if args["save_model"] is not None:
+            with open(args["save_model"], "wb") as f:
+                pickle.dump(params, f)
         accuracies = [r["accuracy"] for r in eval_results]
         for i, accuracy in enumerate(
             accuracies[args["training_range"] :], args["training_range"] + 1
