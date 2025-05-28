@@ -57,6 +57,11 @@ def make_chorus(
     return chorus_model
 
 
+constants.MODEL_BUILDERS["chorus"] = partial(
+    make_chorus, rnn_core=thesis.models.ChorusRNN
+)
+
+
 def get_model_kwargs(model_builder, args):
     attributes = ("rnn_core", "inner_core", None)
     names = []
@@ -205,15 +210,21 @@ class NNCH(ExperimentAdapter):
             type=int,
             default=128,
         )
-        parser.add_argument(
-            "--max-branches", type=int, help="maximum number of branches"
-        )
         parser.add_argument("--num-heads", type=int, help="number of attention heads")
+        parser.add_argument(
+            "--max-branches",
+            type=int,
+            default=0,
+            help="maximum number of branches (<1 for infinity)",
+        )
+        parser.add_argument(
+            "--max-branch-length",
+            "--max-branch-len",
+            type=int,
+            default=0,
+            help="maximum length of branches (<1 for infinity)",
+        )
 
-    @patch.dict(
-        "neural_networks_chomsky_hierarchy.experiments.training._update_parameters",
-        chorus=partial(make_chorus, rnn_core=thesis.models.ChorusRNN),
-    )
     @staticmethod
     def run(
         args: dict[str, Any], log_hook: Callable[[dict[str, Any]], None] | None
@@ -267,7 +278,7 @@ class NNCH(ExperimentAdapter):
             learning_rate=args["learning_rate"],
             accuracy_fn=accuracy_fn,
             compute_full_range_test=True,
-            max_range_test_length=args["max_test_length"],
+            max_range_test_length=args["testing_range"],
             range_test_total_batch_size=512,
             range_test_sub_batch_size=64,
             is_autoregressive=args["autoregressive"],
