@@ -1,5 +1,6 @@
 import math
 import logging
+import random
 
 import jax.numpy as jnp
 import haiku as hk
@@ -13,14 +14,16 @@ class Chorus(hk.RNNCore):
     def __init__(
         self,
         hidden_size: int,
-        max_branches: int = 0,
-        max_branch_length: int = 0,
+        max_branches: int,
+        max_branch_length: int,
+        random_num_branches: bool,
         name: str | None = None,
     ):
         super().__init__(name=name)
         self.hidden_size = hidden_size
         self.max_branches = max_branches
         self.max_branch_length = max_branch_length
+        self.random_num_branches = random_num_branches
 
         self.rnn_cell = hk.GRU(hidden_size=hidden_size)
 
@@ -28,7 +31,9 @@ class Chorus(hk.RNNCore):
         return self.rnn_cell.initial_state(batch_size)
 
     def get_num_branches(self, seq_len: int):
-        if self.max_branch_length > 0:
+        if self.random_num_branches:
+            num_branches = random.randint(1, math.ceil(seq_len / 2))
+        elif self.max_branch_length > 0:
             num_branches = math.ceil(seq_len / self.max_branch_length)
         else:
             num_branches = math.ceil(math.sqrt(seq_len))
@@ -72,11 +77,14 @@ class ChorusRNN(Chorus):
         self,
         hidden_size: int,
         outer_hidden_size: int,
-        max_branches: int = 0,
-        max_branch_length: int = 0,
+        max_branches: int,
+        max_branch_length: int,
+        random_num_branches: bool,
         name: str | None = None,
     ):
-        super().__init__(hidden_size, max_branches, max_branch_length, name=name)
+        super().__init__(
+            hidden_size, max_branches, max_branch_length, random_num_branches, name=name
+        )
         self.composer = hk.GRU(hidden_size=outer_hidden_size)
 
     def initial_state(self, batch_size: int) -> tuple[jnp.ndarray, jnp.ndarray]:

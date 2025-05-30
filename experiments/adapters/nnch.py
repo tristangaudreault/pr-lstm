@@ -226,6 +226,11 @@ class NNCH(ExperimentAdapter):
             default=0,
             help="maximum length of branches (<1 for infinity)",
         )
+        parser.add_argument(
+            "--random-num-branches",
+            action="store_true",
+            help="number of branches will be random instead of optimal",
+        )
 
     @staticmethod
     def run(
