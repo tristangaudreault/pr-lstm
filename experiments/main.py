@@ -22,19 +22,10 @@ def run_wandb(args: dict[str, Any], adapter: type[ExperimentAdapter]):
         project=os.getenv("WANDB_PROJECT"),
         config=args,
     ) as run:
-        log_hook = lambda log_data: run.log(log_data)
-
-        train_results, eval_results, params = adapter.run(wandb.config, log_hook)  # type: ignore
-
+        train_results, eval_results, params = adapter.run(wandb.config, run.log)  # type: ignore
         if args["save_model"] is not None:
             with open(args["save_model"], "wb") as f:
                 pickle.dump(params, f)
-        accuracies = [r["accuracy"] for r in eval_results]
-        for i, accuracy in enumerate(
-            accuracies[args["training_range"] :], args["training_range"] + 1
-        ):
-            log_data = {"sequence_length": i, "test/accuracy": accuracy.item()}
-            run.log(log_data)
 
 
 def main():

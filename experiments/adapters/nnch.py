@@ -1,19 +1,23 @@
 from argparse import ArgumentParser
 import inspect
-from functools import partial, wraps
+from functools import partial
 from typing import Any, Callable
 import pickle
 from types import SimpleNamespace
+from unittest.mock import patch
+from contextlib import ExitStack
+from dataclasses import dataclass
+import math
 
 import haiku as hk
 import jax.nn as jnn
 import jax.numpy as jnp
-from unittest.mock import patch
 
 from neural_networks_chomsky_hierarchy.experiments import (  # type: ignore
     constants,
     training,
     utils,
+    range_evaluation,
 )
 from neural_networks_chomsky_hierarchy.experiments import curriculum as curriculum_lib  # type: ignore
 
@@ -76,27 +80,63 @@ def get_model_kwargs(model_builder, args):
     return {k: v for k, v in args.items() if k in names and v is not None}
 
 
-def log_wrapper(
-    func: Callable, log_hook: Callable[[dict[str, Any]], None], frequency: int
+def throttle(frequency: int):
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            wrapper._count += 1
+            if wrapper._count % frequency == 0:
+                return func(*args, **kwargs)
+
+        wrapper._count = 0
+        return wrapper
+
+    return decorator
+
+
+def log_result(
+    func: Callable, logger: Callable[[Any], None], frequency: int
 ) -> Callable:
-    iterations = 0
+    throttled_logger = throttle(frequency)(logger)
 
-    @wraps(func)
     def wrapper(*args, **kwargs):
-        nonlocal iterations
         result = func(*args, **kwargs)
-        iterations += 1
-
-        if (iterations - 1) % frequency == 0:
-            params, opt_state, (train_loss, train_metrics, train_accuracy) = result
-            log_hook(
-                {
-                    "train/accuracy": float(train_accuracy),
-                    "train/loss": float(train_loss),
-                }
-            )
-
+        params, opt_state, (train_loss, train_metrics, train_accuracy) = result
+        throttled_logger(
+            {
+                "train/accuracy": float(train_accuracy),
+                "train/loss": float(train_loss),
+            }
+        )
         return result
+
+    return wrapper
+
+
+def log_branching(func: Callable, logger: Callable[[Any], None]):
+    def wrapper(self, seq_length: int):
+        num_branches = func(self, seq_length)
+        logger(
+            {
+                "test/sequence_length": seq_length,
+                "test/num_branches": num_branches,
+                "test/branch_length": math.ceil(seq_length / num_branches),
+            },
+            commit=False,
+        )
+        return num_branches
+
+    return wrapper
+
+
+def log_accuracy(func: Callable, logger: Callable[[Any], None]):
+    def wrapper(*args, **kwargs):
+        accuracy = func(*args, **kwargs)
+        logger(
+            {
+                "test/accuracy": accuracy,
+            },
+        )
+        return accuracy
 
     return wrapper
 
@@ -234,7 +274,7 @@ class NNCH(ExperimentAdapter):
 
     @staticmethod
     def run(
-        args: dict[str, Any], log_hook: Callable[[dict[str, Any]], None] | None
+        args: dict[str, Any], logger: Callable[[dict[str, Any]], None] | None
     ) -> Any:
         # Create the task.
         curriculum = curriculum_lib.UniformCurriculum(
@@ -293,7 +333,7 @@ class NNCH(ExperimentAdapter):
             loss_fn=loss_fn,
             learning_rate=args["learning_rate"],
             accuracy_fn=accuracy_fn,
-            compute_full_range_test=True,
+            compute_full_range_test=False,
             max_range_test_length=args["testing_range"],
             range_test_total_batch_size=512,
             range_test_sub_batch_size=64,
@@ -301,15 +341,41 @@ class NNCH(ExperimentAdapter):
         )
 
         training_worker = training.TrainingWorker(training_params, use_tqdm=True)
-        if log_hook:
-            with patch(
-                "neural_networks_chomsky_hierarchy.experiments.training._update_parameters",
-                new=log_wrapper(
-                    training._update_parameters, log_hook, args["log_frequency"]
-                ),
-            ):
-                train_results, eval_results, params = training_worker.run()
-        else:
-            train_results, eval_results, params = training_worker.run()
+        with ExitStack() as stack:
+            if logger is not None:
+                stack.enter_context(
+                    patch(
+                        "neural_networks_chomsky_hierarchy.experiments.training._update_parameters",
+                        new=log_result(
+                            training._update_parameters, logger, args["log_frequency"]
+                        ),
+                    )
+                )
+            results, _, params = training_worker.run()
 
-        return train_results, eval_results, params
+            if logger is not None:
+                stack.enter_context(
+                    patch.object(
+                        thesis.models.ChorusRNN,
+                        "get_num_branches",
+                        log_branching(thesis.models.ChorusRNN.get_num_branches, logger),
+                    )
+                )
+
+            eval_params = range_evaluation.EvaluationParams(
+                model=model,
+                params=params,
+                accuracy_fn=(
+                    log_accuracy(accuracy_fn, logger)
+                    if logger is not None
+                    else accuracy_fn
+                ),
+                sample_batch=task.sample_batch,
+                max_test_length=training_params.max_range_test_length,
+                total_batch_size=training_params.range_test_total_batch_size,
+                sub_batch_size=training_params.range_test_sub_batch_size,
+                is_autoregressive=training_params.is_autoregressive,
+            )
+            eval_results = range_evaluation.range_evaluation(eval_params, use_tqdm=True)
+
+            return results, eval_results, params
