@@ -28,7 +28,7 @@ from interface import ExperimentAdapter
 @staticmethod
 def make_chorus(
     output_size: int,
-    rnn_core: type[thesis.models.Chorus],
+    rnn_core: type[hk.RNNCore],
     return_all_outputs: bool = False,
     input_window: int = 1,
     **model_kwargs: Any,
@@ -253,25 +253,6 @@ class NNCH(ExperimentAdapter):
             default=128,
         )
         parser.add_argument("--num-heads", type=int, help="number of attention heads")
-        parser.add_argument(
-            "--max-branches",
-            type=int,
-            default=0,
-            help="maximum number of branches (<1 for infinity)",
-        )
-        parser.add_argument(
-            "--max-branch-length",
-            "--max-branch-len",
-            type=int,
-            default=0,
-            help="maximum length of branches (<1 for infinity)",
-        )
-        parser.add_argument(
-            "--random-num-branches",
-            action="store_true",
-            help="number of branches will be random instead of optimal",
-        )
-
     @staticmethod
     def run(
         args: dict[str, Any], logger: Callable[[dict[str, Any]], None] | None

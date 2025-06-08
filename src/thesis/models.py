@@ -1,75 +1,66 @@
 import math
 import logging
-import random
+from typing import Any
 
 import jax.numpy as jnp
 import haiku as hk
 
-from neural_networks_chomsky_hierarchy.models import transformer  # type: ignore
-
 logger = logging.getLogger(__name__)
+
+from thesis.utils import reshape_with_padding
 
 
 class Chorus(hk.RNNCore):
     def __init__(
         self,
         hidden_size: int,
-        max_branches: int,
-        max_branch_length: int,
-        random_num_branches: bool,
         name: str | None = None,
     ):
         super().__init__(name=name)
         self.hidden_size = hidden_size
-        self.max_branches = max_branches
-        self.max_branch_length = max_branch_length
-        self.random_num_branches = random_num_branches
 
         self.rnn_cell = hk.GRU(hidden_size=hidden_size)
 
-    def initial_state(self, batch_size: int):
+    def initial_state(self, batch_size: int) -> Any:
         return self.rnn_cell.initial_state(batch_size)
 
-    def get_num_branches(self, seq_len: int):
-        if self.random_num_branches:
-            num_branches = random.randint(1, math.ceil(seq_len / 2))
-        elif self.max_branch_length > 0:
-            num_branches = math.ceil(seq_len / self.max_branch_length)
-        else:
-            num_branches = math.ceil(math.sqrt(seq_len))
-            if self.max_branches > 0:
-                num_branches = min(num_branches, self.max_branches)
+    def get_num_branches(self, seq_len: int) -> int:
+        return math.ceil(math.sqrt(seq_len))
 
-        return num_branches
-
-    @staticmethod
-    def adapt_input(x: jnp.ndarray, num_branches: int) -> jnp.ndarray:
-        """Adapt the input for use by the Chorus model. Returns an array of shape (batch size, number of branches, branch Length, embedding dimension)"""
-        batch_size, seq_len, embed_dim = x.shape
-        branch_len = -(-seq_len // num_branches)
-
-        required_len = num_branches * branch_len
-        pad_len = required_len - seq_len
-        x = jnp.pad(x, ((0, 0), (0, pad_len), (0, 0))) if pad_len > 0 else x
-
-        x = x.reshape(batch_size, num_branches, branch_len, embed_dim)
-        return x.transpose(2, 0, 1, 3).reshape(
-            branch_len, batch_size * num_branches, embed_dim
-        )
+    def expand_initial_state(self, h0: Any, num_branches: int) -> Any:
+        return jnp.repeat(h0, num_branches, axis=0)
 
     def process(
         self, x: jnp.ndarray, h0: jnp.ndarray, num_branches: int
     ) -> jnp.ndarray:
-        h0 = jnp.repeat(h0, num_branches, axis=0)
-        return hk.dynamic_unroll(self.rnn_cell, x, h0)[1]
+        """
+        Applies branched processing to an input 3D tensor of shape (seq, batch, dim) and returns the final hidden state of shape (batch * num_branches, hidden_dim).
+
+        Args:
+            x (jnp.ndarray): Input of shape (seq, batch, dim).
+            h0 (jnp.ndarray): Initial hidden state of shape (batch, hidden_dim).
+            num_branches: Number of branches to split the sequence into.
+
+        Returns:
+            jnp.ndarray: Final hidden state of shape (batch * num_branches, hidden_dim).
+        """
+        assert x.ndim == 3, "Expected x of shape (seq, batch, dim)"
+        assert h0.ndim == 2, "Expected h0 of shape (batch, hidden_dim)"
+
+        x = reshape_with_padding(x, num_branches)
+        seq_rows, seq_cols, batch, dim = x.shape
+
+        x = x.transpose(1, 2, 0, 3)
+        x = x.reshape(seq_cols, batch * seq_rows, dim)
+
+        _, hx = hk.dynamic_unroll(self.rnn_cell, x, h0)
+        return hx
 
     def __call__(self, x: jnp.ndarray, h0: jnp.ndarray) -> jnp.ndarray:
-        num_branches = self.get_num_branches(x.shape[1])
-        return self.process(
-            self.adapt_input(x, num_branches),
-            h0,
-            num_branches,
-        )
+        x = x.swapaxes(0, 1)
+        num_branches = self.get_num_branches(x.shape[0])
+        h0 = self.expand_initial_state(h0, num_branches)
+        return self.process(x, h0, num_branches)
 
 
 class ChorusRNN(Chorus):
@@ -77,24 +68,28 @@ class ChorusRNN(Chorus):
         self,
         hidden_size: int,
         outer_hidden_size: int,
-        max_branches: int,
-        max_branch_length: int,
-        random_num_branches: bool,
         name: str | None = None,
     ):
-        super().__init__(
-            hidden_size, max_branches, max_branch_length, random_num_branches, name=name
-        )
-        self.composer = hk.GRU(hidden_size=outer_hidden_size)
+        super().__init__(hidden_size, name=name)
+        self.outer_rnn_cell = hk.GRU(hidden_size=outer_hidden_size)
 
     def initial_state(self, batch_size: int) -> tuple[jnp.ndarray, jnp.ndarray]:
-        return super().initial_state(batch_size), self.composer.initial_state(
+        return super().initial_state(batch_size), self.outer_rnn_cell.initial_state(
             batch_size
         )
+
+    def expand_initial_state(self, h0: Any, num_branches: int):
+        inner_h0, outer_h0 = h0
+        return super().expand_initial_state(inner_h0, num_branches), outer_h0
 
     def process(
         self, x: jnp.ndarray, h0: jnp.ndarray, num_branches: int
     ) -> jnp.ndarray:
-        branch_hxs = super().process(x, h0[0], num_branches)
-        branch_hxs = jnp.reshape(branch_hxs, (-1, num_branches, self.hidden_size))
-        return hk.dynamic_unroll(self.composer, branch_hxs, h0[1], time_major=False)[1]
+        _, batch, _ = x.shape
+        inner_h0, outer_h0 = h0
+        inner_hx = super().process(x, inner_h0, num_branches)
+        inner_hx = jnp.reshape(inner_hx, (batch, num_branches, self.hidden_size))
+        _, outer_hx = hk.dynamic_unroll(
+            self.outer_rnn_cell, inner_hx, outer_h0, time_major=False
+        )
+        return outer_hx
