@@ -10,5 +10,5 @@ class ExperimentAdapter(ABC):
     @staticmethod
     @abstractmethod
     def run(
-        args: dict[str, Any], log_hook: Callable[[float, int], None] | None
+        args: dict[str, Any], logger: Callable[[dict[str, Any]], None] | None
     ) -> Any: ...

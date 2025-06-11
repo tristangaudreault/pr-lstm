@@ -63,9 +63,7 @@ def make_chorus(
     return chorus_model
 
 
-constants.MODEL_BUILDERS["chorus"] = partial(
-    make_chorus, rnn_core=thesis.models.ChorusRNN
-)
+constants.MODEL_BUILDERS["chorus"] = partial(make_chorus, rnn_core=thesis.models.Chorus)
 
 
 def get_model_kwargs(model_builder, args):
@@ -253,6 +251,7 @@ class NNCH(ExperimentAdapter):
             default=128,
         )
         parser.add_argument("--num-heads", type=int, help="number of attention heads")
+
     @staticmethod
     def run(
         args: dict[str, Any], logger: Callable[[dict[str, Any]], None] | None
@@ -295,6 +294,11 @@ class NNCH(ExperimentAdapter):
         if args["load_model"] is not None:
             with open(args["load_model"], "rb") as f:
                 params = pickle.load(f)
+            
+            # for model_key, model_val in params.items():
+            #     print(model_key)
+            #     for param_key, param_val in model_val.items():
+            #         print(f"\t{param_key}: {param_val.shape}")
 
             model = SimpleNamespace(init=lambda *args: params, apply=model.apply)
             training_steps = -1
@@ -337,9 +341,9 @@ class NNCH(ExperimentAdapter):
             if logger is not None:
                 stack.enter_context(
                     patch.object(
-                        thesis.models.ChorusRNN,
+                        thesis.models.Chorus,
                         "get_num_branches",
-                        log_branching(thesis.models.ChorusRNN.get_num_branches, logger),
+                        log_branching(thesis.models.Chorus.get_num_branches, logger),
                     )
                 )
 
@@ -357,6 +361,8 @@ class NNCH(ExperimentAdapter):
                 sub_batch_size=training_params.range_test_sub_batch_size,
                 is_autoregressive=training_params.is_autoregressive,
             )
-            eval_results = range_evaluation.range_evaluation(eval_params, use_tqdm=True)
+            eval_results = range_evaluation.range_evaluation(
+                eval_params, use_tqdm=False
+            )
 
             return results, eval_results, params
