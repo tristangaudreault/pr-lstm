@@ -4,6 +4,7 @@ import logging
 from typing import Any
 import pickle
 from contextlib import ExitStack
+import pprint
 
 from dotenv import load_dotenv
 
@@ -14,11 +15,20 @@ from control import get_adapter_map, parse_args
 import adapters  # Needed to discover available adapters
 
 
-def test_logger(log_data: dict[str, Any], commit: bool = True):
-    if "test/accuracy" in log_data.keys():
+def test_logger(
+    log_data: dict[str, Any], step: int | None = None, commit: bool | None = None
+):
+    if next(iter(log_data)).startswith("train/"):
+        return
+    elif "test/accuracy" in log_data.keys():
         print(f" {log_data["test/accuracy"]},", end="")
-    if "test/sequence_length" in log_data.keys():
-        print(f"\n{log_data["test/sequence_length"]}, {log_data["test/num_branches"]}, {log_data["test/branch_length"]}:", end="")
+    elif "test/sequence_length" in log_data.keys():
+        print(
+            f"\n{log_data["test/sequence_length"]}, {log_data["test/num_branches"]}, {log_data["test/branch_length"]}:",
+            end="",
+        )
+    else:
+        pprint.pprint(log_data)
 
 
 def main():
@@ -44,12 +54,11 @@ def main():
                 )  # type: ignore
             )
             config, logger = run.config, run.log
-        else:
-            train_results, eval_results, params = adapter.run(config, logger)
-            accuracies = [r["accuracy"] for r in eval_results]
-            if args["save_model"] is not None:
-                with open(args["save_model"], "wb") as f:
-                    pickle.dump(params, f)
+
+        train_results, eval_results, params = adapter.run(config, logger)
+        if args["save_model"] is not None:
+            with open(args["save_model"], "wb") as f:
+                pickle.dump(params, f)
 
 
 if __name__ == "__main__":

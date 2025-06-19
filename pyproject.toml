@@ -15,6 +15,7 @@ dependencies = [
   "plotly",
   "wandb",
   "einops",
+  "sympy",
 ]
 authors = [
   { name = "Tristan Gaudreault", email = "tristan@tristangaudreault.com" },

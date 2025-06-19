@@ -6,9 +6,11 @@ import pickle
 from types import SimpleNamespace
 from unittest.mock import patch
 from contextlib import ExitStack
-from dataclasses import dataclass
 import math
+import inspect
+import time
 
+import jax
 import haiku as hk
 import jax.nn as jnn
 import jax.numpy as jnp
@@ -22,13 +24,14 @@ from neural_networks_chomsky_hierarchy.experiments import (  # type: ignore
 from neural_networks_chomsky_hierarchy.experiments import curriculum as curriculum_lib  # type: ignore
 
 import thesis
-from interface import ExperimentAdapter
+from interface import ExperimentAdapter, Logger
+import thesis.branching
 
 
 @staticmethod
 def make_chorus(
     output_size: int,
-    rnn_core: type[hk.RNNCore],
+    rnn_core: type[thesis.models.Chorus],
     return_all_outputs: bool = False,
     input_window: int = 1,
     **model_kwargs: Any,
@@ -91,9 +94,7 @@ def throttle(frequency: int):
     return decorator
 
 
-def log_result(
-    func: Callable, logger: Callable[[Any], None], frequency: int
-) -> Callable:
+def log_result(func: Callable, logger: Logger, frequency: int) -> Callable:
     throttled_logger = throttle(frequency)(logger)
 
     def wrapper(*args, **kwargs):
@@ -110,7 +111,7 @@ def log_result(
     return wrapper
 
 
-def log_branching(func: Callable, logger: Callable[[Any], None]):
+def log_branching(func: Callable, logger: Logger):
     def wrapper(self, seq_length: int):
         num_branches = func(self, seq_length)
         logger(
@@ -119,21 +120,21 @@ def log_branching(func: Callable, logger: Callable[[Any], None]):
                 "test/num_branches": num_branches,
                 "test/branch_length": math.ceil(seq_length / num_branches),
             },
-            commit=False,
+            commit=False,  # type: ignore
         )
         return num_branches
 
     return wrapper
 
 
-def log_accuracy(func: Callable, logger: Callable[[Any], None]):
+def log_accuracy(func: Callable, logger: Logger):
     def wrapper(*args, **kwargs):
         accuracy = func(*args, **kwargs)
         logger(
             {
                 "test/accuracy": accuracy,
             },
-        )
+        )  # type: ignore
         return accuracy
 
     return wrapper
@@ -142,6 +143,14 @@ def log_accuracy(func: Callable, logger: Callable[[Any], None]):
 class NNCH(ExperimentAdapter):
     @staticmethod
     def add_arguments(parser: ArgumentParser):
+        parser.add_argument(
+            "--operation-mode",
+            "--mode",
+            default="standard",
+            choices=["train/test", "timing"],
+            help="operation mode of the experiment",
+        )
+
         # Reporting
         parser.add_argument(
             "--log-frequency",
@@ -251,11 +260,17 @@ class NNCH(ExperimentAdapter):
             default=128,
         )
         parser.add_argument("--num-heads", type=int, help="number of attention heads")
+        parser.add_argument(
+            "--branching-policy",
+            "--branching-method",
+            choices=[
+                name
+                for name, _ in inspect.getmembers(thesis.branching, inspect.isfunction)
+            ],
+        )
 
     @staticmethod
-    def run(
-        args: dict[str, Any], logger: Callable[[dict[str, Any]], None] | None
-    ) -> Any:
+    def run(args: dict[str, Any], logger: Logger | None) -> Any:
         # Create the task.
         curriculum = curriculum_lib.UniformCurriculum(
             values=list(range(args["min_training_range"], args["training_range"] + 1))
@@ -294,7 +309,7 @@ class NNCH(ExperimentAdapter):
         if args["load_model"] is not None:
             with open(args["load_model"], "rb") as f:
                 params = pickle.load(f)
-            
+
             # for model_key, model_val in params.items():
             #     print(model_key)
             #     for param_key, param_val in model_val.items():
@@ -324,6 +339,41 @@ class NNCH(ExperimentAdapter):
             range_test_sub_batch_size=64,
             is_autoregressive=args["autoregressive"],
         )
+
+        if args["operation_mode"] == "timing":
+            rng_seq = hk.PRNGSequence(training_params.seed)
+            dummy_batch = task.sample_batch(
+                next(rng_seq), length=10, batch_size=training_params.batch_size
+            )
+            model_init_rng_key = jax.random.PRNGKey(training_params.model_init_seed)
+
+            if training_params.is_autoregressive:
+                params = model.init(
+                    model_init_rng_key,
+                    dummy_batch["input"],
+                    dummy_batch["output"],
+                    sample=False,
+                )
+            else:
+                params = model.init(model_init_rng_key, dummy_batch["input"])
+
+            num_trials = 10
+            for seq_len in [10**i for i in range(5)]:
+                for batch_size in [2**i for i in range(10)]:
+                    total_time = 0.0
+                    for _ in range(num_trials):
+                        batch = task.sample_batch(
+                            next(rng_seq), length=seq_len, batch_size=batch_size
+                        )
+                        start_time = time.time()
+                        outputs = model.apply(params, next(rng_seq), batch["input"])
+                        outputs.block_until_ready()
+                        stop_time = time.time()
+                        total_time += stop_time - start_time
+
+                    logger({"seq_len": seq_len, "batch_size": batch_size, "avg_time": total_time / num_trials})  # type: ignore
+                    batch_size *= 2
+            return None, None, None
 
         training_worker = training.TrainingWorker(training_params, use_tqdm=True)
         with ExitStack() as stack:

@@ -3,6 +3,9 @@ from argparse import ArgumentParser
 from typing import Any, Callable
 
 
+Logger = Callable[[dict[str, Any], (int | None), (bool | None)], None]
+
+
 class ExperimentAdapter(ABC):
     @staticmethod
     def add_arguments(parser: ArgumentParser): ...
@@ -10,5 +13,6 @@ class ExperimentAdapter(ABC):
     @staticmethod
     @abstractmethod
     def run(
-        args: dict[str, Any], logger: Callable[[dict[str, Any]], None] | None
+        args: dict[str, Any],
+        logger: Logger | None,
     ) -> Any: ...

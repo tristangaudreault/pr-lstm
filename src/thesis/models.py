@@ -1,6 +1,5 @@
-import math
 import logging
-from typing import Any
+from typing import Any, Callable
 
 import jax.numpy as jnp
 import haiku as hk
@@ -9,6 +8,7 @@ from einops import rearrange
 logger = logging.getLogger(__name__)
 
 from thesis.utils import reshape_with_padding
+from thesis import branching
 
 
 class Chorus(hk.RNNCore):
@@ -16,6 +16,7 @@ class Chorus(hk.RNNCore):
         self,
         hidden_size: int,
         outer_hidden_size: int,
+        branching_policy: str,
         name: str | None = None,
     ):
         super().__init__(name=name)
@@ -25,13 +26,17 @@ class Chorus(hk.RNNCore):
         self.inner_cell = hk.GRU(hidden_size=hidden_size)
         self.outer_cell = hk.GRU(hidden_size=outer_hidden_size)
 
+        self.branching_policy: Callable[[int], int] = getattr(
+            branching, branching_policy
+        )
+
     def initial_state(self, batch_size: int) -> Any:
         return self.inner_cell.initial_state(batch_size), self.outer_cell.initial_state(
             batch_size
         )
 
     def get_num_branches(self, seq_len: int) -> int:
-        return math.ceil(math.sqrt(seq_len))
+        return self.branching_policy(seq_len)
 
     @staticmethod
     def branch(
