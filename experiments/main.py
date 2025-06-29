@@ -13,6 +13,7 @@ sys.path.append("external")
 
 from control import get_adapter_map, parse_args
 import adapters  # Needed to discover available adapters
+import thesis
 
 
 def test_logger(
@@ -21,12 +22,7 @@ def test_logger(
     if next(iter(log_data)).startswith("train/"):
         return
     elif "test/accuracy" in log_data.keys():
-        print(f" {log_data["test/accuracy"]},", end="")
-    elif "test/sequence_length" in log_data.keys():
-        print(
-            f"\n{log_data["test/sequence_length"]}, {log_data["test/num_branches"]}, {log_data["test/branch_length"]}:",
-            end="",
-        )
+        print(f"{log_data["test/accuracy"]}")
     else:
         pprint.pprint(log_data)
 
@@ -37,7 +33,9 @@ def main():
     if args["output"]:
         sys.stdout = open(args["output"], "w")
         sys.stderr = sys.stdout
-    logging.basicConfig(level=getattr(logging, args["log_level"].upper(), logging.INFO))
+    log_level = getattr(logging, args["log_level"].upper(), logging.INFO)
+    logging.basicConfig()
+    thesis.models.logger.setLevel(log_level)
 
     adapter = adapter_map[args["adapter"]]
 

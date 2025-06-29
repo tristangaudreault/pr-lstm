@@ -6,9 +6,9 @@ import pickle
 from types import SimpleNamespace
 from unittest.mock import patch
 from contextlib import ExitStack
-import math
 import inspect
 import time
+from functools import partial
 
 import jax
 import haiku as hk
@@ -22,6 +22,7 @@ from neural_networks_chomsky_hierarchy.experiments import (  # type: ignore
     range_evaluation,
 )
 from neural_networks_chomsky_hierarchy.experiments import curriculum as curriculum_lib  # type: ignore
+from neural_networks_chomsky_hierarchy.models import transformer
 
 import thesis
 from interface import ExperimentAdapter, Logger
@@ -52,10 +53,15 @@ def make_chorus(
 
     def chorus_model(x: jnp.ndarray, input_length: int = 1) -> jnp.ndarray:
         batch_size = x.shape[0]
-        core = rnn_core(**model_kwargs)
-        initial_state = core.initial_state(batch_size)
-
-        output = core(x, initial_state)
+        core = rnn_core(
+            transformer=partial(
+                transformer.TransformerEncoder,
+                config=transformer.TransformerConfig(output_size=256),
+            ),
+            rnn=partial(hk.GRU, hidden_size=128),
+            **model_kwargs,
+        )
+        output = core(x)
         output = jnp.reshape(output, (batch_size, -1))
         output = jnn.relu(output)
         output = hk.Linear(output_size)(output)
@@ -66,7 +72,10 @@ def make_chorus(
     return chorus_model
 
 
-constants.MODEL_BUILDERS["chorus"] = partial(make_chorus, rnn_core=thesis.models.Chorus)
+constants.MODEL_BUILDERS["chorus"] = partial(
+    make_chorus,
+    rnn_core=thesis.models.Chorus,
+)
 
 
 def get_model_kwargs(model_builder, args):
@@ -107,22 +116,6 @@ def log_result(func: Callable, logger: Logger, frequency: int) -> Callable:
             }
         )
         return result
-
-    return wrapper
-
-
-def log_branching(func: Callable, logger: Logger):
-    def wrapper(self, seq_length: int):
-        num_branches = func(self, seq_length)
-        logger(
-            {
-                "test/sequence_length": seq_length,
-                "test/num_branches": num_branches,
-                "test/branch_length": math.ceil(seq_length / num_branches),
-            },
-            commit=False,  # type: ignore
-        )
-        return num_branches
 
     return wrapper
 
@@ -387,15 +380,6 @@ class NNCH(ExperimentAdapter):
                     )
                 )
             results, _, params = training_worker.run()
-
-            if logger is not None:
-                stack.enter_context(
-                    patch.object(
-                        thesis.models.Chorus,
-                        "get_num_branches",
-                        log_branching(thesis.models.Chorus.get_num_branches, logger),
-                    )
-                )
 
             eval_params = range_evaluation.EvaluationParams(
                 model=model,

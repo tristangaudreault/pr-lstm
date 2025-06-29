@@ -1,38 +1,31 @@
 import math
 import jax.numpy as jnp
+import jax.nn
 from einops import rearrange
 
 
-def reshape_with_padding(x: jnp.ndarray, num_branches: int) -> jnp.ndarray:
-    """
-    Reshapes a 3D tensor of shape (seq, batch, dim) into (num_branches, branch_len, batch, dim),
-    padding the sequence dimension if necessary.
+def reshape_with_padding(
+    x: jnp.ndarray, rows: int | None = None, cols: int | None = None
+) -> jnp.ndarray:
+    seq = x.shape[1]
 
-    Args:
-        x (jnp.ndarray): Input of shape (seq, batch, dim).
-        num_branches (int): Number of branches to split the sequence into.
+    if rows is None and cols is None:
+        raise ValueError("At least one of either `rows` or `cols` must be specified.")
+    elif rows is None:
+        rows = math.ceil(seq / cols)  # type: ignore
+    elif cols is None:
+        cols = math.ceil(seq / rows)
 
-    Returns:
-        jnp.ndarray: Array of shape (num_branches, branch_len, batch, dim).
-
-    Raises:
-        ValueError: If num_branches is not positive or x is not 3D.
-    """
-    if x.ndim != 3:
-        raise ValueError(f"Input must be 3D, got shape {x.shape}")
-    if num_branches <= 0:
-        raise ValueError(f"num_branches must be positive, got {num_branches}")
-
-    seq = x.shape[0]
-    branch_len = math.ceil(seq / num_branches)
-    pad_len = (num_branches * branch_len) - seq
-
+    pad_len = (rows * cols) - seq  # type: ignore
     if pad_len > 0:
-        x = jnp.pad(x, ((0, pad_len), (0, 0), (0, 0)))
+        x = jnp.pad(x, ((0, 0), (0, pad_len), (0, 0)))
 
-    # Fixed einops pattern to match desired output shape
-    return rearrange(
-        x,
-        "(num_branches branch_len) batch dim -> branch_len (batch num_branches) dim",
-        num_branches=num_branches,
-    )
+    pattern = "batch (rows cols) dim -> (batch rows) cols dim"
+    return rearrange(x, pattern, rows=rows)
+
+
+def prepend_cls(x: jnp.ndarray):
+    x = jnp.pad(x, ((0, 0), (0, 0), (0, 1)))
+    cls = jax.nn.one_hot(x.shape[2] - 1, x.shape[2])
+    cls = jnp.broadcast_to(cls, (x.shape[0], 1, x.shape[2]))
+    return jnp.concatenate((cls, x), axis=1)
