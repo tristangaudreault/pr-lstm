@@ -1,39 +1,38 @@
 import logging
-from typing import Any, Callable
+from typing import Callable, Sequence
 
-import jax
 import jax.numpy as jnp
 import haiku as hk
 from einops import rearrange
 
 logger = logging.getLogger(__name__)
 
-from thesis.utils import reshape_with_padding, prepend_cls
+from thesis.utils import reshape_with_padding
 
 
 class Chorus(hk.Module):
     def __init__(
         self,
-        transformer: Callable[[], Callable],
-        rnn: Callable[[], hk.RNNCore],
+        hyperlayers: Sequence[Callable[[jnp.ndarray], jnp.ndarray]],
         name: str | None = None,
     ):
         super().__init__(name=name)
-        self.transformer = transformer
-        self.rnn = rnn
+        self.hyperlayers = hyperlayers
 
     def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
         batch = x.shape[0]
-        x = reshape_with_padding(x, cols=4)
-        x = prepend_cls(x)
-        hx = self.transformer()(x)
-        hx = hx[:, 0, :]
-        hx = rearrange(
-            hx,
-            "(batch rows) dim -> batch rows dim",
-            batch=batch,
-        )
-        rnn = self.rnn()
-        h0 = rnn.initial_state(batch)
-        _, hx = hk.dynamic_unroll(rnn, hx, h0, time_major=False)
+        hx = x
+        for hyperlayer in self.hyperlayers[:-1]:
+            hx = reshape_with_padding(hx, cols=4)
+            logger.debug(hx.shape)
+            hx = hyperlayer(hx)
+            logger.debug(hx.shape)
+            hx = rearrange(
+                hx,
+                "(batch rows) dim -> batch rows dim",
+                batch=batch,
+            )
+            logger.debug(hx.shape)
+        hx = hyperlayer(hx)
+        logger.debug(hx.shape)
         return hx

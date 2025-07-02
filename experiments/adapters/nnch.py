@@ -25,6 +25,7 @@ from neural_networks_chomsky_hierarchy.experiments import curriculum as curricul
 from neural_networks_chomsky_hierarchy.models import transformer
 
 import thesis
+from thesis import hyperlayers
 from interface import ExperimentAdapter, Logger
 import thesis.branching
 
@@ -32,7 +33,7 @@ import thesis.branching
 @staticmethod
 def make_chorus(
     output_size: int,
-    rnn_core: type[thesis.models.Chorus],
+    inner_core: type[hk.Module] = thesis.models.Chorus,
     return_all_outputs: bool = False,
     input_window: int = 1,
     **model_kwargs: Any,
@@ -53,13 +54,15 @@ def make_chorus(
 
     def chorus_model(x: jnp.ndarray, input_length: int = 1) -> jnp.ndarray:
         batch_size = x.shape[0]
-        core = rnn_core(
-            transformer=partial(
-                transformer.TransformerEncoder,
-                config=transformer.TransformerConfig(output_size=256),
-            ),
-            rnn=partial(hk.GRU, hidden_size=128),
-            **model_kwargs,
+        core = inner_core(
+            hyperlayers=(
+                hyperlayers.transformer_encoder_hyperlayer(
+                    transformer.TransformerEncoder,
+                    config=transformer.TransformerConfig(output_size=16),
+                ),
+                # thesis.models.rnn_hyperlayer(hk.GRU, hidden_size=256),
+                hyperlayers.rnn_hyperlayer(hk.GRU, hidden_size=8),
+            )
         )
         output = core(x)
         output = jnp.reshape(output, (batch_size, -1))
@@ -72,10 +75,7 @@ def make_chorus(
     return chorus_model
 
 
-constants.MODEL_BUILDERS["chorus"] = partial(
-    make_chorus,
-    rnn_core=thesis.models.Chorus,
-)
+constants.MODEL_BUILDERS["chorus"] = make_chorus
 
 
 def get_model_kwargs(model_builder, args):
@@ -276,7 +276,7 @@ class NNCH(ExperimentAdapter):
         model = model_builder(
             output_size=task.output_size,
             return_all_outputs=True,
-            **get_model_kwargs(model_builder, args),
+            # **get_model_kwargs(model_builder, args),
         )
         if args["autoregressive"]:
             if "transformer" not in args["model"]:
