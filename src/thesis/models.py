@@ -1,11 +1,11 @@
 import logging
 from typing import Callable, Sequence
 
+logger = logging.getLogger(__name__)
+
 import jax.numpy as jnp
 import haiku as hk
 from einops import rearrange
-
-logger = logging.getLogger(__name__)
 
 from thesis.utils import reshape_with_padding
 

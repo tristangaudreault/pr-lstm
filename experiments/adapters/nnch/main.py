@@ -1,6 +1,5 @@
 from argparse import ArgumentParser
 import inspect
-from functools import partial
 from typing import Any, Callable
 import pickle
 from types import SimpleNamespace
@@ -8,7 +7,6 @@ from unittest.mock import patch
 from contextlib import ExitStack
 import inspect
 import time
-from functools import partial
 
 import jax
 import haiku as hk
@@ -22,12 +20,12 @@ from neural_networks_chomsky_hierarchy.experiments import (  # type: ignore
     range_evaluation,
 )
 from neural_networks_chomsky_hierarchy.experiments import curriculum as curriculum_lib  # type: ignore
-from neural_networks_chomsky_hierarchy.models import transformer
+from neural_networks_chomsky_hierarchy.models import transformer  # type: ignore
 
+from . import cli
 import thesis
 from thesis import hyperlayers
 from interface import ExperimentAdapter, Logger
-import thesis.branching
 
 
 @staticmethod
@@ -38,20 +36,6 @@ def make_chorus(
     input_window: int = 1,
     **model_kwargs: Any,
 ) -> Callable[[jnp.ndarray], jnp.ndarray]:
-    """Modified implementation of make_rnn. Returns an Chorus model, not haiku transformed.
-
-    Only the last output in the sequence is returned. A linear layer is added to
-    match the required output_size.
-
-    Args:
-    output_size: The output size of the model.
-    rnn_core: The haiku RNN core to use. LSTM by default.
-    return_all_outputs: Whether to return the whole sequence of outputs of the
-        RNN, or just the last one.
-    input_window: The number of tokens that are fed at once to the RNN.
-    **model_kwargs: Kwargs to be passed to the RNN core.
-    """
-
     def chorus_model(x: jnp.ndarray, input_length: int = 1) -> jnp.ndarray:
         batch_size = x.shape[0]
         core = inner_core(
@@ -136,131 +120,7 @@ def log_accuracy(func: Callable, logger: Logger):
 class NNCH(ExperimentAdapter):
     @staticmethod
     def add_arguments(parser: ArgumentParser):
-        parser.add_argument(
-            "--operation-mode",
-            "--mode",
-            default="standard",
-            choices=["train/test", "timing"],
-            help="operation mode of the experiment",
-        )
-
-        # Reporting
-        parser.add_argument(
-            "--log-frequency",
-            type=int,
-            default=1_000,
-            help="number iterations between log entries",
-        )
-
-        # Experiment
-        parser.add_argument(
-            "--task",
-            type=str,
-            choices=constants.TASK_BUILDERS.keys(),
-            default="even_pairs",
-            help="length generalization task",
-        )
-        parser.add_argument(
-            "--training-steps",
-            type=int,
-            default=1_000_000,
-            help="number of training steps",
-        )
-        parser.add_argument(
-            "-b",
-            "--batch-size",
-            type=int,
-            default=128,
-            help="number of samples in each training batch",
-        )
-        parser.add_argument(
-            "-lr", "--learning-rate", type=float, default=1e-3, help="learning rate"
-        )
-        parser.add_argument(
-            "--min-training-range",
-            type=int,
-            default=1,
-            help="minimum length of training sequences",
-        )
-        parser.add_argument(
-            "-N",
-            "--training-range",
-            type=int,
-            default=40,
-            help="maximum training sequence length",
-        )
-        parser.add_argument(
-            "-M",
-            "--testing-range",
-            type=int,
-            default=500,
-            help="maximum length of testing sequences",
-        )
-        parser.add_argument(
-            "--autoregressive",
-            action="store_true",
-            help="use autoregressive sampling",
-        )
-        parser.add_argument(
-            "--computation-steps-mult",
-            type=int,
-            default=0,
-            help=(
-                "number of computation tokens to append (as multiple of input length)"
-            ),
-        )
-
-        # Models
-        parser.add_argument(
-            "--model",
-            type=str,
-            choices=constants.MODEL_BUILDERS.keys(),
-            default="tape_rnn",
-            help="model architecture",
-        )
-        parser.add_argument(
-            "--hidden-size",
-            type=int,
-            default=256,
-        )
-        parser.add_argument(
-            "--memory-cell-size",
-            type=int,
-            default=8,
-            help="dimension of vectors put in memory",
-        )
-        parser.add_argument(
-            "--memory-size",
-            type=int,
-            default=256,
-            help="size of tape (fixed along the episode)",
-        )
-        parser.add_argument(
-            "--stack-cell-size",
-            type=int,
-            default=8,
-            help="dimension of vectors put in the stack",
-        )
-        parser.add_argument(
-            "--stack-size",
-            type=int,
-            default=128,
-            help="total number of vectors that can be stacked",
-        )
-        parser.add_argument(
-            "--outer-hidden-size",
-            type=int,
-            default=128,
-        )
-        parser.add_argument("--num-heads", type=int, help="number of attention heads")
-        parser.add_argument(
-            "--branching-policy",
-            "--branching-method",
-            choices=[
-                name
-                for name, _ in inspect.getmembers(thesis.branching, inspect.isfunction)
-            ],
-        )
+        cli.add_arguments(parser)
 
     @staticmethod
     def run(args: dict[str, Any], logger: Logger | None) -> Any:
