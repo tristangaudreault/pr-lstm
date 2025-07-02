@@ -16,9 +16,9 @@ def rnn_hyperlayer(rnn_core: type[hk.RNNCore], **kwargs):
     return hyperlayer
 
 
-def transformer_encoder_hyperlayer(transformer_encoder: type[hk.Module], **kwargs):
+def cls_token_hyperlayer(layer: type[hk.Module], **kwargs):
     def hyperlayer(x: jnp.ndarray):
-        encoder = transformer_encoder(**kwargs)
+        encoder = layer(**kwargs)
         x = prepend_cls(x)
         output = encoder(x)
         cls_token_output = output[:, 0, :]

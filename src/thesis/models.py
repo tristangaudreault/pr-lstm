@@ -3,6 +3,7 @@ from typing import Callable, Sequence
 
 logger = logging.getLogger(__name__)
 
+import jax
 import jax.numpy as jnp
 import haiku as hk
 from einops import rearrange
@@ -23,16 +24,9 @@ class Chorus(hk.Module):
         batch = x.shape[0]
         hx = x
         for hyperlayer in self.hyperlayers[:-1]:
-            hx = reshape_with_padding(hx, cols=4)
-            logger.debug(hx.shape)
+            hx = reshape_with_padding(hx, cols=2)
             hx = hyperlayer(hx)
-            logger.debug(hx.shape)
-            hx = rearrange(
-                hx,
-                "(batch rows) dim -> batch rows dim",
-                batch=batch,
-            )
-            logger.debug(hx.shape)
-        hx = hyperlayer(hx)
-        logger.debug(hx.shape)
+            pattern = "(batch rows) dim -> batch rows dim"
+            hx = rearrange(hx, pattern, batch=batch)
+        hx = self.hyperlayers[-1](hx)
         return hx

@@ -7,15 +7,12 @@ name = "thesis"
 version = "0.0.1"
 dependencies = [
   "dm-haiku",
-  "filelock",
   "jax[cuda12] ; sys_platform == 'linux'",
   "jax ; sys_platform != 'linux'",
-  "pandas",
   "dotenv",
-  "plotly",
   "wandb",
   "einops",
-  "sympy",
+  "tensorflow"
 ]
 authors = [
   { name = "Tristan Gaudreault", email = "tristan@tristangaudreault.com" },

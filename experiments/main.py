@@ -12,7 +12,7 @@ load_dotenv(override=True)
 sys.path.append("external")
 
 from control import get_adapter_map, parse_args
-import adapters  # Needed to discover available adapters
+from adapters import *  # Needed to discover available adapters
 import thesis
 
 
@@ -22,7 +22,7 @@ def test_logger(
     if next(iter(log_data)).startswith("train/"):
         return
     elif "test/accuracy" in log_data.keys():
-        print(f"{log_data["test/accuracy"]}")
+        print(f"{log_data["test/accuracy"]}", end="\n" if commit else ", ")
     else:
         pprint.pprint(log_data)
 

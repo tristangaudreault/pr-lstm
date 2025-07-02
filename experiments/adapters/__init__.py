@@ -1,3 +1,1 @@
-from pathlib import Path
-
-from nnch import main
+__all__ = ["nnch"]

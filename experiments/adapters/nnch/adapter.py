@@ -7,6 +7,7 @@ from unittest.mock import patch
 from contextlib import ExitStack
 import inspect
 import time
+from functools import partial
 
 import jax
 import haiku as hk
@@ -37,18 +38,8 @@ def make_chorus(
     **model_kwargs: Any,
 ) -> Callable[[jnp.ndarray], jnp.ndarray]:
     def chorus_model(x: jnp.ndarray, input_length: int = 1) -> jnp.ndarray:
-        batch_size = x.shape[0]
-        core = inner_core(
-            hyperlayers=(
-                hyperlayers.transformer_encoder_hyperlayer(
-                    transformer.TransformerEncoder,
-                    config=transformer.TransformerConfig(output_size=16),
-                ),
-                # thesis.models.rnn_hyperlayer(hk.GRU, hidden_size=256),
-                hyperlayers.rnn_hyperlayer(hk.GRU, hidden_size=8),
-            )
-        )
-        output = core(x)
+        batch_size, _, embedding_dim = x.shape
+        output = inner_core()(x)
         output = jnp.reshape(output, (batch_size, -1))
         output = jnn.relu(output)
         output = hk.Linear(output_size)(output)
@@ -59,7 +50,35 @@ def make_chorus(
     return chorus_model
 
 
-constants.MODEL_BUILDERS["chorus"] = make_chorus
+constants.MODEL_BUILDERS["chorus"] = partial(
+    make_chorus,
+    inner_core=partial(
+        thesis.models.Chorus,
+        hyperlayers=(
+            # hyperlayers.cls_token_hyperlayer(
+            #     transformer.TransformerEncoder,
+            #     config=transformer.TransformerConfig(
+            #         output_size=32,
+            #         embedding_dim=1,
+            #         use_embeddings=False,
+            #         num_hiddens_per_head=32,
+            #         num_layers=1,
+            #         num_heads=1,
+            #     ),
+            # ),
+            hyperlayers.rnn_hyperlayer(hk.GRU, hidden_size=64),
+            hyperlayers.rnn_hyperlayer(hk.GRU, hidden_size=64),
+            hyperlayers.rnn_hyperlayer(hk.GRU, hidden_size=64),
+        ),
+    ),  # type: ignore
+)
+constants.MODEL_BUILDERS["cascade"] = partial(
+    make_chorus,
+    inner_core=partial(
+        thesis.models.Cascade,
+        hyperlayer=hyperlayers.rnn_hyperlayer(hk.GRU, hidden_size=64),
+    ),  # type: ignore
+)
 
 
 def get_model_kwargs(model_builder, args):
@@ -105,12 +124,17 @@ def log_result(func: Callable, logger: Logger, frequency: int) -> Callable:
 
 
 def log_accuracy(func: Callable, logger: Logger):
+    count = 0
+
     def wrapper(*args, **kwargs):
+        nonlocal count
+        count += 1
         accuracy = func(*args, **kwargs)
         logger(
             {
                 "test/accuracy": accuracy,
             },
+            commit=count % 8 == 0,  # type: ignore
         )  # type: ignore
         return accuracy
 
@@ -148,6 +172,7 @@ class NNCH(ExperimentAdapter):
             model = utils.make_model_with_empty_targets(
                 model, task, args["computation_steps_mult"], single_output
             )
+
         model = hk.transform(model)
 
         # Create the loss and accuracy based on the pointwise ones.
