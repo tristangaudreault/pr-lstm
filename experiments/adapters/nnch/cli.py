@@ -119,3 +119,7 @@ def add_arguments(parser: ArgumentParser):
         default=128,
     )
     parser.add_argument("--num-heads", type=int, help="number of attention heads")
+
+    # Chorus
+    parser.add_argument("--rows", type=int, help="number of rows in chorus reshape operation")
+    parser.add_argument("--cols", type=int, help="number of columns in chorus reshape operation")

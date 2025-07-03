@@ -30,32 +30,31 @@ from interface import ExperimentAdapter, Logger
 
 
 @staticmethod
-def make_chorus(
+def make_model(
     output_size: int,
-    inner_core: type[hk.Module] = thesis.models.Chorus,
+    inner_core: type[hk.Module],
     return_all_outputs: bool = False,
     input_window: int = 1,
     **model_kwargs: Any,
 ) -> Callable[[jnp.ndarray], jnp.ndarray]:
-    def chorus_model(x: jnp.ndarray, input_length: int = 1) -> jnp.ndarray:
-        batch_size, _, embedding_dim = x.shape
+    def model(x: jnp.ndarray, input_length: int = 1) -> jnp.ndarray:
         output = inner_core()(x)
-        output = jnp.reshape(output, (batch_size, -1))
+        output = jnp.reshape(output, (x.shape[0], -1))
         output = jnn.relu(output)
         output = hk.Linear(output_size)(output)
         output = jnp.expand_dims(output, axis=1)
 
         return output
 
-    return chorus_model
+    return model
 
 
 constants.MODEL_BUILDERS["chorus"] = partial(
-    make_chorus,
+    make_model,
     inner_core=partial(
         thesis.models.Chorus,
         hyperlayers=(
-            # hyperlayers.cls_token_hyperlayer(
+            # hyperlayers.cls_hyperlayer(
             #     transformer.TransformerEncoder,
             #     config=transformer.TransformerConfig(
             #         output_size=32,
@@ -70,13 +69,6 @@ constants.MODEL_BUILDERS["chorus"] = partial(
             hyperlayers.rnn_hyperlayer(hk.GRU, hidden_size=64),
             hyperlayers.rnn_hyperlayer(hk.GRU, hidden_size=64),
         ),
-    ),  # type: ignore
-)
-constants.MODEL_BUILDERS["cascade"] = partial(
-    make_chorus,
-    inner_core=partial(
-        thesis.models.Cascade,
-        hyperlayer=hyperlayers.rnn_hyperlayer(hk.GRU, hidden_size=64),
     ),  # type: ignore
 )
 
@@ -188,11 +180,6 @@ class NNCH(ExperimentAdapter):
             with open(args["load_model"], "rb") as f:
                 params = pickle.load(f)
 
-            # for model_key, model_val in params.items():
-            #     print(model_key)
-            #     for param_key, param_val in model_val.items():
-            #         print(f"\t{param_key}: {param_val.shape}")
-
             model = SimpleNamespace(init=lambda *args: params, apply=model.apply)
             training_steps = -1
         else:
@@ -217,41 +204,6 @@ class NNCH(ExperimentAdapter):
             range_test_sub_batch_size=64,
             is_autoregressive=args["autoregressive"],
         )
-
-        if args["operation_mode"] == "timing":
-            rng_seq = hk.PRNGSequence(training_params.seed)
-            dummy_batch = task.sample_batch(
-                next(rng_seq), length=10, batch_size=training_params.batch_size
-            )
-            model_init_rng_key = jax.random.PRNGKey(training_params.model_init_seed)
-
-            if training_params.is_autoregressive:
-                params = model.init(
-                    model_init_rng_key,
-                    dummy_batch["input"],
-                    dummy_batch["output"],
-                    sample=False,
-                )
-            else:
-                params = model.init(model_init_rng_key, dummy_batch["input"])
-
-            num_trials = 10
-            for seq_len in [10**i for i in range(5)]:
-                for batch_size in [2**i for i in range(10)]:
-                    total_time = 0.0
-                    for _ in range(num_trials):
-                        batch = task.sample_batch(
-                            next(rng_seq), length=seq_len, batch_size=batch_size
-                        )
-                        start_time = time.time()
-                        outputs = model.apply(params, next(rng_seq), batch["input"])
-                        outputs.block_until_ready()
-                        stop_time = time.time()
-                        total_time += stop_time - start_time
-
-                    logger({"seq_len": seq_len, "batch_size": batch_size, "avg_time": total_time / num_trials})  # type: ignore
-                    batch_size *= 2
-            return None, None, None
 
         training_worker = training.TrainingWorker(training_params, use_tqdm=True)
         with ExitStack() as stack:

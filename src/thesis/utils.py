@@ -1,24 +1,17 @@
-import math
 import jax.numpy as jnp
 import jax.nn
 from einops import rearrange
 
 
-def reshape_with_padding(
-    x: jnp.ndarray, rows: int | None = None, cols: int | None = None
-) -> jnp.ndarray:
+def ceil_division(numerator: int, denominator: int) -> int:
+    return -(-numerator // denominator)
+
+
+def reshape_with_padding(x: jnp.ndarray, rows: int, cols: int) -> jnp.ndarray:
     seq = x.shape[1]
 
-    if rows is None and cols is None:
-        raise ValueError("At least one of either `rows` or `cols` must be specified.")
-    elif rows is None:
-        rows = math.ceil(seq / cols)  # type: ignore
-    elif cols is None:
-        cols = math.ceil(seq / rows)
-
     pad_len = (rows * cols) - seq  # type: ignore
-    if pad_len > 0:
-        x = jnp.pad(x, ((0, 0), (0, pad_len), (0, 0)))
+    x = jnp.pad(x, ((0, 0), (0, pad_len), (0, 0)))
 
     pattern = "batch (rows cols) dim -> (batch rows) cols dim"
     return rearrange(x, pattern, rows=rows)
