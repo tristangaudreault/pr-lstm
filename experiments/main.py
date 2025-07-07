@@ -1,19 +1,20 @@
-import os
-import sys
 import logging
-from typing import Any
+import os
 import pickle
-from contextlib import ExitStack
 import pprint
+import sys
+from contextlib import ExitStack
+from typing import Any
 
 from dotenv import load_dotenv
 
 load_dotenv(override=True)
 sys.path.append("external")
 
-from control import get_adapter_map, parse_args
-from adapters import *  # Needed to discover available adapters
 import thesis
+
+import adapters  # Load all adapters
+from control import get_adapter_map, parse_args
 
 
 def test_logger(
@@ -21,7 +22,7 @@ def test_logger(
 ):
     if next(iter(log_data)).startswith("train/"):
         return
-    elif "test/accuracy" in log_data.keys():
+    elif "test/accuracy" in log_data:
         print(f"{log_data["test/accuracy"]}", end="\n" if commit else ", ")
     else:
         pprint.pprint(log_data)

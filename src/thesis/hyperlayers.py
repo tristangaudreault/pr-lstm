@@ -1,5 +1,5 @@
-import jax.numpy as jnp
 import haiku as hk
+import jax.numpy as jnp
 
 from thesis.utils import prepend_cls
 

@@ -1,7 +1,7 @@
-import pytest
+import jax
 import jax.numpy as jnp
 import numpy as np
-import jax
+import pytest
 from jax import random
 
 from thesis import utils

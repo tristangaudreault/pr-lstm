@@ -1,6 +1,6 @@
 from argparse import ArgumentParser
 
-from neural_networks_chomsky_hierarchy.experiments import constants  # type: ignore
+from neural_networks_chomsky_hierarchy.experiments import constants
 
 
 def add_arguments(parser: ArgumentParser):
@@ -121,5 +121,9 @@ def add_arguments(parser: ArgumentParser):
     parser.add_argument("--num-heads", type=int, help="number of attention heads")
 
     # Chorus
-    parser.add_argument("--rows", type=int, help="number of rows in chorus reshape operation")
-    parser.add_argument("--cols", type=int, help="number of columns in chorus reshape operation")
+    parser.add_argument(
+        "--rows", type=int, help="number of rows in chorus reshape operation"
+    )
+    parser.add_argument(
+        "--cols", type=int, help="number of columns in chorus reshape operation"
+    )

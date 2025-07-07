@@ -1,76 +1,35 @@
-from argparse import ArgumentParser
 import inspect
-from typing import Any, Callable
 import pickle
-from types import SimpleNamespace
-from unittest.mock import patch
+from argparse import ArgumentParser
 from contextlib import ExitStack
-import inspect
-import time
-from functools import partial
+from types import SimpleNamespace
+from typing import Any
+from unittest.mock import patch
 
-import jax
 import haiku as hk
-import jax.nn as jnn
 import jax.numpy as jnp
+from neural_networks_chomsky_hierarchy.experiments import constants
+from neural_networks_chomsky_hierarchy.experiments import \
+    curriculum as curriculum_lib
+from neural_networks_chomsky_hierarchy.experiments import (range_evaluation,
+                                                           training, utils)
 
-from neural_networks_chomsky_hierarchy.experiments import (  # type: ignore
-    constants,
-    training,
-    utils,
-    range_evaluation,
-)
-from neural_networks_chomsky_hierarchy.experiments import curriculum as curriculum_lib  # type: ignore
-from neural_networks_chomsky_hierarchy.models import transformer  # type: ignore
-
-from . import cli
-import thesis
-from thesis import hyperlayers
 from interface import ExperimentAdapter, Logger
 
-
-@staticmethod
-def make_model(
-    output_size: int,
-    inner_core: type[hk.Module],
-    return_all_outputs: bool = False,
-    input_window: int = 1,
-    **model_kwargs: Any,
-) -> Callable[[jnp.ndarray], jnp.ndarray]:
-    def model(x: jnp.ndarray, input_length: int = 1) -> jnp.ndarray:
-        output = inner_core()(x)
-        output = jnp.reshape(output, (x.shape[0], -1))
-        output = jnn.relu(output)
-        output = hk.Linear(output_size)(output)
-        output = jnp.expand_dims(output, axis=1)
-
-        return output
-
-    return model
+from . import cli, wrappers
 
 
-constants.MODEL_BUILDERS["chorus"] = partial(
-    make_model,
-    inner_core=partial(
-        thesis.models.Chorus,
-        hyperlayers=(
-            # hyperlayers.cls_hyperlayer(
-            #     transformer.TransformerEncoder,
-            #     config=transformer.TransformerConfig(
-            #         output_size=32,
-            #         embedding_dim=1,
-            #         use_embeddings=False,
-            #         num_hiddens_per_head=32,
-            #         num_layers=1,
-            #         num_heads=1,
-            #     ),
-            # ),
-            hyperlayers.rnn_hyperlayer(hk.GRU, hidden_size=64),
-            hyperlayers.rnn_hyperlayer(hk.GRU, hidden_size=64),
-            hyperlayers.rnn_hyperlayer(hk.GRU, hidden_size=64),
-        ),
-    ),  # type: ignore
-)
+class NNCH(ExperimentAdapter):
+    @staticmethod
+    def add_arguments(parser: ArgumentParser):
+        cli.add_arguments(parser)
+
+    @staticmethod
+    def run(args: dict[str, Any], logger: Logger | None) -> Any:
+        training_params = init_traning_params(args)
+        results, params = train(training_params, args, logger)
+        eval_results = eval(training_params, params, logger)
+        return results, eval_results, params
 
 
 def get_model_kwargs(model_builder, args):
@@ -85,155 +44,105 @@ def get_model_kwargs(model_builder, args):
     return {k: v for k, v in args.items() if k in names and v is not None}
 
 
-def throttle(frequency: int):
-    def decorator(func):
-        def wrapper(*args, **kwargs):
-            wrapper._count += 1
-            if wrapper._count % frequency == 0:
-                return func(*args, **kwargs)
+def init_traning_params(args: dict[str, Any]):
+    # Create the task.
+    curriculum = curriculum_lib.UniformCurriculum(
+        values=list(range(args["min_training_range"], args["training_range"] + 1))
+    )
+    task = constants.TASK_BUILDERS[args["task"]]()
 
-        wrapper._count = 0
-        return wrapper
-
-    return decorator
-
-
-def log_result(func: Callable, logger: Logger, frequency: int) -> Callable:
-    throttled_logger = throttle(frequency)(logger)
-
-    def wrapper(*args, **kwargs):
-        result = func(*args, **kwargs)
-        params, opt_state, (train_loss, train_metrics, train_accuracy) = result
-        throttled_logger(
-            {
-                "train/accuracy": float(train_accuracy),
-                "train/loss": float(train_loss),
-            }
+    # Create the model.
+    single_output = task.output_length(10) == 1
+    model_builder = constants.MODEL_BUILDERS[args["model"]]
+    model = model_builder(
+        output_size=task.output_size,
+        return_all_outputs=True,
+        # **get_model_kwargs(model_builder, args),
+    )
+    if args["autoregressive"]:
+        if "transformer" not in args["model"]:
+            model = utils.make_model_with_targets_as_input(
+                model, args["computation_steps_mult"]
+            )
+        model = utils.add_sampling_to_autoregressive_model(model, single_output)
+    else:
+        model = utils.make_model_with_empty_targets(
+            model, task, args["computation_steps_mult"], single_output
         )
-        return result
 
-    return wrapper
+    model = hk.transform(model)
+
+    # Create the loss and accuracy based on the pointwise ones.
+    def loss_fn(output, target):
+        loss = jnp.mean(jnp.sum(task.pointwise_loss_fn(output, target), axis=-1))
+        return loss, {}
+
+    def accuracy_fn(output, target):
+        mask = task.accuracy_mask(target)
+        return jnp.sum(mask * task.accuracy_fn(output, target)) / jnp.sum(mask)
+
+    if args["load_model"] is not None:
+        with open(args["load_model"], "rb") as f:
+            params = pickle.load(f)
+
+        model = SimpleNamespace(init=lambda *args: params, apply=model.apply)
+        training_steps = -1
+    else:
+        training_steps = args["training_steps"]
+
+    # Create the final training parameters.
+    training_params = training.ClassicTrainingParams(
+        seed=0,
+        model_init_seed=0,
+        training_steps=training_steps,
+        log_frequency=args["log_frequency"],
+        length_curriculum=curriculum,
+        batch_size=args["batch_size"],
+        task=task,
+        model=model,  # type: ignore
+        loss_fn=loss_fn,  # type: ignore
+        learning_rate=args["learning_rate"],
+        accuracy_fn=accuracy_fn,
+        compute_full_range_test=False,
+        max_range_test_length=args["testing_range"],
+        range_test_total_batch_size=512,
+        range_test_sub_batch_size=64,
+        is_autoregressive=args["autoregressive"],
+    )
+    return training_params
 
 
-def log_accuracy(func: Callable, logger: Logger):
-    count = 0
-
-    def wrapper(*args, **kwargs):
-        nonlocal count
-        count += 1
-        accuracy = func(*args, **kwargs)
-        logger(
-            {
-                "test/accuracy": accuracy,
-            },
-            commit=count % 8 == 0,  # type: ignore
-        )  # type: ignore
-        return accuracy
-
-    return wrapper
-
-
-class NNCH(ExperimentAdapter):
-    @staticmethod
-    def add_arguments(parser: ArgumentParser):
-        cli.add_arguments(parser)
-
-    @staticmethod
-    def run(args: dict[str, Any], logger: Logger | None) -> Any:
-        # Create the task.
-        curriculum = curriculum_lib.UniformCurriculum(
-            values=list(range(args["min_training_range"], args["training_range"] + 1))
-        )
-        task = constants.TASK_BUILDERS[args["task"]]()
-
-        # Create the model.
-        single_output = task.output_length(10) == 1
-        model_builder = constants.MODEL_BUILDERS[args["model"]]
-        model = model_builder(
-            output_size=task.output_size,
-            return_all_outputs=True,
-            # **get_model_kwargs(model_builder, args),
-        )
-        if args["autoregressive"]:
-            if "transformer" not in args["model"]:
-                model = utils.make_model_with_targets_as_input(
-                    model, args["computation_steps_mult"]
+def train(training_params, args, logger):
+    training_worker = training.TrainingWorker(training_params, use_tqdm=True)
+    with ExitStack() as stack:
+        if logger is not None:
+            stack.enter_context(
+                patch(
+                    "neural_networks_chomsky_hierarchy.experiments.training._update_parameters",
+                    new=wrappers.wrap_update_parameters(
+                        training._update_parameters, logger, args["log_frequency"]
+                    ),
                 )
-            model = utils.add_sampling_to_autoregressive_model(model, single_output)
-        else:
-            model = utils.make_model_with_empty_targets(
-                model, task, args["computation_steps_mult"], single_output
             )
+        results, _, params = training_worker.run()
 
-        model = hk.transform(model)
+    return results, params
 
-        # Create the loss and accuracy based on the pointwise ones.
-        def loss_fn(output, target):
-            loss = jnp.mean(jnp.sum(task.pointwise_loss_fn(output, target), axis=-1))
-            return loss, {}
 
-        def accuracy_fn(output, target):
-            mask = task.accuracy_mask(target)
-            return jnp.sum(mask * task.accuracy_fn(output, target)) / jnp.sum(mask)
-
-        if args["load_model"] is not None:
-            with open(args["load_model"], "rb") as f:
-                params = pickle.load(f)
-
-            model = SimpleNamespace(init=lambda *args: params, apply=model.apply)
-            training_steps = -1
-        else:
-            training_steps = args["training_steps"]
-
-        # Create the final training parameters.
-        training_params = training.ClassicTrainingParams(
-            seed=0,
-            model_init_seed=0,
-            training_steps=training_steps,
-            log_frequency=args["log_frequency"],
-            length_curriculum=curriculum,
-            batch_size=args["batch_size"],
-            task=task,
-            model=model,
-            loss_fn=loss_fn,
-            learning_rate=args["learning_rate"],
-            accuracy_fn=accuracy_fn,
-            compute_full_range_test=False,
-            max_range_test_length=args["testing_range"],
-            range_test_total_batch_size=512,
-            range_test_sub_batch_size=64,
-            is_autoregressive=args["autoregressive"],
-        )
-
-        training_worker = training.TrainingWorker(training_params, use_tqdm=True)
-        with ExitStack() as stack:
-            if logger is not None:
-                stack.enter_context(
-                    patch(
-                        "neural_networks_chomsky_hierarchy.experiments.training._update_parameters",
-                        new=log_result(
-                            training._update_parameters, logger, args["log_frequency"]
-                        ),
-                    )
-                )
-            results, _, params = training_worker.run()
-
-            eval_params = range_evaluation.EvaluationParams(
-                model=model,
-                params=params,
-                accuracy_fn=(
-                    log_accuracy(accuracy_fn, logger)
-                    if logger is not None
-                    else accuracy_fn
-                ),
-                sample_batch=task.sample_batch,
-                max_test_length=training_params.max_range_test_length,
-                total_batch_size=training_params.range_test_total_batch_size,
-                sub_batch_size=training_params.range_test_sub_batch_size,
-                is_autoregressive=training_params.is_autoregressive,
-            )
-            eval_results = range_evaluation.range_evaluation(
-                eval_params, use_tqdm=False
-            )
-
-            return results, eval_results, params
+def eval(training_params, params, logger):
+    eval_params = range_evaluation.EvaluationParams(
+        model=training_params.model,
+        params=params,
+        accuracy_fn=(
+            wrappers.wrap_accuracy_fn(training_params.accuracy_fn, logger)
+            if logger is not None
+            else training_params.accuracy_fn
+        ),
+        sample_batch=training_params.task.sample_batch,
+        max_test_length=training_params.max_range_test_length,
+        total_batch_size=training_params.range_test_total_batch_size,
+        sub_batch_size=training_params.range_test_sub_batch_size,
+        is_autoregressive=training_params.is_autoregressive,
+    )
+    eval_results = range_evaluation.range_evaluation(eval_params, use_tqdm=False)
+    return eval_results

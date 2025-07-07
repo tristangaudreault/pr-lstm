@@ -1,15 +1,14 @@
 import logging
-from typing import Callable, Sequence
 import math
+from typing import Callable, Sequence
 
 logger = logging.getLogger(__name__)
 
-import jax
-import jax.numpy as jnp
 import haiku as hk
+import jax.numpy as jnp
 from einops import rearrange
 
-from thesis.utils import reshape_with_padding, ceil_division
+from thesis.utils import ceil_division, reshape_with_padding
 
 
 class Chorus(hk.Module):
@@ -38,14 +37,23 @@ class Chorus(hk.Module):
 
         return self.rows, self.cols
 
-    def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
+    def encoder(self, x: jnp.ndarray) -> jnp.ndarray:
         batch = x.shape[0]
         hx = x
         for hyperlayer in self.hyperlayers[:-1]:
             rows, cols = self.infer_shape(sequence_length=x.shape[1])
             hx = reshape_with_padding(hx, rows=rows, cols=cols)
+            pattern = "batch rows cols dim -> (batch rows) cols dim"
+            hx = rearrange(hx, pattern, rows=rows)
             hx = hyperlayer(hx)
             pattern = "(batch rows) dim -> batch rows dim"
             hx = rearrange(hx, pattern, batch=batch)
         hx = self.hyperlayers[-1](hx)
         return hx
+
+    def decoder(self, hx: jnp.ndarray) -> jnp.ndarray:
+        return hx
+
+    def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
+        hx = self.encoder(x)
+        return self.decoder(hx)

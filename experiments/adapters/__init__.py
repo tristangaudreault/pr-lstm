@@ -1,1 +1,1 @@
-__all__ = ["nnch"]
+from . import nnch

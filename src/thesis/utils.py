@@ -1,5 +1,5 @@
-import jax.numpy as jnp
 import jax.nn
+import jax.numpy as jnp
 from einops import rearrange
 
 
@@ -10,10 +10,10 @@ def ceil_division(numerator: int, denominator: int) -> int:
 def reshape_with_padding(x: jnp.ndarray, rows: int, cols: int) -> jnp.ndarray:
     seq = x.shape[1]
 
-    pad_len = (rows * cols) - seq  # type: ignore
+    pad_len = (rows * cols) - seq
     x = jnp.pad(x, ((0, 0), (0, pad_len), (0, 0)))
 
-    pattern = "batch (rows cols) dim -> (batch rows) cols dim"
+    pattern = "batch (rows cols) dim -> batch rows cols dim"
     return rearrange(x, pattern, rows=rows)
 
 

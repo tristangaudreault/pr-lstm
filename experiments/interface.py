@@ -2,7 +2,6 @@ from abc import ABC, abstractmethod
 from argparse import ArgumentParser
 from typing import Any, Callable
 
-
 Logger = Callable[[dict[str, Any], (int | None), (bool | None)], None]
 
 
