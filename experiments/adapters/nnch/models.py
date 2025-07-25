@@ -2,12 +2,11 @@ from functools import partial
 from typing import Any, Callable
 
 import haiku as hk
+import jax
 import jax.nn as jnn
 import jax.numpy as jnp
 from neural_networks_chomsky_hierarchy.experiments import constants
-from neural_networks_chomsky_hierarchy.models import transformer
-from thesis import hyperlayers
-from thesis.models import Chorus
+from thesis.models import Speculative
 
 
 def make_model(
@@ -19,6 +18,8 @@ def make_model(
 ) -> Callable[[jnp.ndarray], jnp.ndarray]:
     def model(x: jnp.ndarray, input_length: int = 1) -> jnp.ndarray:
         output = inner_core()(x)
+        if not return_all_outputs:
+            output = output[:, -1, :]  # (batch, time, alphabet_dim)
         output = jnp.reshape(output, (x.shape[0], -1))
         output = jnn.relu(output)
         output = hk.Linear(output_size)(output)
@@ -29,26 +30,8 @@ def make_model(
     return model
 
 
-constants.MODEL_BUILDERS["chorus"] = partial(
-    make_model,
-    inner_core=partial(
-        Chorus,
-        hyperlayers=(
-            # hyperlayers.cls_hyperlayer(
-            #     transformer.TransformerEncoder,
-            #     config=transformer.TransformerConfig(
-            #         output_size=32,
-            #         embedding_dim=1,
-            #         use_embeddings=False,
-            #         num_hiddens_per_head=32,
-            #         num_layers=1,
-            #         num_heads=1,
-            #     ),
-            # ),
-            hyperlayers.rnn_hyperlayer(hk.GRU, hidden_size=64),
-            hyperlayers.rnn_hyperlayer(hk.GRU, hidden_size=64),
-            hyperlayers.rnn_hyperlayer(hk.GRU, hidden_size=64),
-        ),
-        cols=2,
-    ),  # type: ignore
+constants.MODEL_BUILDERS.update(
+    {
+        "speculative": partial(make_model, inner_core=partial(Speculative, hidden_size=16, K=32, rows=1, cols=None)),  # type: ignore
+    }
 )

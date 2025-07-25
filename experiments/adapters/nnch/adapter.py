@@ -5,14 +5,19 @@ from contextlib import ExitStack
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
+import logging
+
+logger = logging.getLogger(__name__)
 
 import haiku as hk
 import jax.numpy as jnp
 from neural_networks_chomsky_hierarchy.experiments import constants
-from neural_networks_chomsky_hierarchy.experiments import \
-    curriculum as curriculum_lib
-from neural_networks_chomsky_hierarchy.experiments import (range_evaluation,
-                                                           training, utils)
+from neural_networks_chomsky_hierarchy.experiments import curriculum as curriculum_lib
+from neural_networks_chomsky_hierarchy.experiments import (
+    range_evaluation,
+    training,
+    utils,
+)
 
 from interface import ExperimentAdapter, Logger
 
@@ -56,9 +61,10 @@ def init_traning_params(args: dict[str, Any]):
     model_builder = constants.MODEL_BUILDERS[args["model"]]
     model = model_builder(
         output_size=task.output_size,
-        return_all_outputs=True,
+        return_all_outputs=not single_output,
         # **get_model_kwargs(model_builder, args),
     )
+    logger.warning("Model is not getting kwargs from cli arguments, need to implement this.")
     if args["autoregressive"]:
         if "transformer" not in args["model"]:
             model = utils.make_model_with_targets_as_input(
