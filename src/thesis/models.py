@@ -1,102 +1,113 @@
-import math
 import logging
-
-import jax.numpy as jnp
-import haiku as hk
-
-from neural_networks_chomsky_hierarchy.models import transformer
 
 logger = logging.getLogger(__name__)
 
+import haiku as hk
+import jax
+import jax.numpy as jnp
+import jax.nn as jnn
 
-class Chorus(hk.RNNCore):
-    def __init__(self, hidden_size, num_branches, name=None):
+from thesis.utils import infer_shape, reshape_with_padding, scaled_dot_product_attention
+
+
+class Speculative(hk.Module):
+    def __init__(
+        self,
+        hidden_size: int,
+        K: int,
+        rows: int | None = 2,
+        cols: int | None = None,
+        name: str | None = None,
+    ):
         super().__init__(name=name)
         self.hidden_size = hidden_size
-        self.num_branches = num_branches
-        
-        self.rnn_cell = hk.GRU(hidden_size=hidden_size)
+        self.K = K
+        self.rows = rows
+        self.cols = cols
 
-    def initial_state(self, batch_size):
-        return jnp.repeat(
-            self.rnn_cell.initial_state(batch_size), self.num_branches, axis=0
+    def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
+        batch_size, length, _ = x.shape
+        partitions, rows, cols = self.partition(x)
+        rnn = hk.VanillaRNN(self.hidden_size)
+
+        s0 = rnn.initial_state(batch_size)
+        keys = self.sample_keys(batch_size, rows - 1, std_dev=2)
+
+        values = self.generate_values(rnn, s0, keys, partitions)
+        first_values = values[:, :1, :, :]
+        initial_query = first_values[:, 0, -1:, :]
+        values = values[:, 1:, :, :].reshape(
+            batch_size, rows - 1, self.K, cols, self.hidden_size
         )
 
-    @staticmethod
-    def adapt_input(x, num_branches):
-        """Adapt the input for use by the Chorus model. Returns an array of shape (batch size, number of branches, branch Length, embedding dimension)"""
-        batch_size, seq_len, embed_dim = x.shape
-        branch_len = -(-seq_len // num_branches)
+        def marginalize(query: jnp.ndarray, xs: jnp.ndarray):
+            key, value = xs
+            states, _ = scaled_dot_product_attention(query, key, value)
+            next_query = states[:, :, -1, :]
+            return next_query, states[:, 0, :, :]
 
-        required_len = num_branches * branch_len
-        pad_len = required_len - seq_len
-        x = jnp.pad(x, ((0, 0), (0, pad_len), (0, 0))) if pad_len > 0 else x
-
-        x = x.reshape(batch_size, num_branches, branch_len, embed_dim)
-        return x.transpose(2, 0, 1, 3).reshape(
-            branch_len, batch_size * num_branches, embed_dim
-        )
-
-    def process(self, x, h0):
-        return hk.dynamic_unroll(self.rnn_cell, x, h0)[1]
-
-    def __call__(self, x, h0):
-        return self.process(self.adapt_input(x, self.num_branches), h0)
-
-
-class ChorusRNN(Chorus):
-    def __init__(self, hidden_size, num_branches, name=None):
-        super().__init__(hidden_size, num_branches, name=name)
-        self.composer = hk.GRU(hidden_size=hidden_size)
-
-    def process(self, x, h0):
-        branch_hxs = super().process(x, h0[0])
-        branch_hxs = jnp.reshape(branch_hxs, (-1, self.num_branches, self.hidden_size))
-        return hk.dynamic_unroll(self.composer, branch_hxs, h0[1], time_major=False)[1]
-
-    def initial_state(self, batch_size):
-        return super().initial_state(batch_size), self.composer.initial_state(
-            batch_size
-        )
-
-
-class ChorusAttn(Chorus):
-    def __init__(self, hidden_size, num_branches, num_heads=4, name=None):
-        super().__init__(hidden_size, num_branches, name=name)
-        self.multihead_attn = hk.MultiHeadAttention(
-            num_heads=num_heads,
-            key_size=hidden_size // num_heads,
-            w_init=hk.initializers.VarianceScaling(
-                scale=1.0, mode="fan_avg", distribution="uniform"
+        # Could potentially use the jax.lax.associative_scan
+        final_query, ys = hk.scan(
+            marginalize,
+            initial_query,
+            (
+                keys.swapaxes(0, 1),
+                values.swapaxes(0, 1),
             ),
         )
 
-    def process(self, x, h0):
-        def f(hx, xt):
-            output, hx = self.rnn_cell(xt, hx)
+        ys = jnp.concatenate((first_values, ys.swapaxes(0, 1)), axis=1)
+        ys = ys.reshape(batch_size, rows * cols, self.hidden_size)
+        ys = ys[:, :length, :]
 
-            hx = self.multihead_attn(hx, hx, hx)
+        return ys
 
-            return hx, output
+    def partition(self, x: jnp.ndarray) -> tuple[jnp.ndarray, int, int]:
+        length = x.shape[1]
+        rows, cols = infer_shape(self.rows, self.cols, length)
+        return reshape_with_padding(x, rows, cols), rows, cols
 
-        return hk.scan(f, h0, x)[0]
+    def sample_keys(
+        self, batch_size: int, num_keys: int, std_dev: float = 1
+    ) -> jnp.ndarray:
+        key = hk.next_rng_key()
+        epsilon = jax.random.normal(
+            key,
+            shape=(
+                batch_size,
+                num_keys,
+                self.K,
+                self.hidden_size,
+            ),
+            # minval=-1,
+            # maxval=1,
+        )
+        return jnn.relu(epsilon * std_dev)
 
+    def generate_values(
+        self,
+        rnn: hk.RNNCore,
+        s0: jnp.ndarray,
+        keys: jnp.ndarray,
+        partitions: jnp.ndarray,
+    ) -> jnp.ndarray:
+        batch_size, rows, cols, dim = partitions.shape
+        num_keys = (rows - 1) * self.K
 
-class ChorusTransformer(Chorus):
-    def __init__(self, hidden_size, num_branches, name=None):
-        super().__init__(hidden_size, num_branches, name=name)
-        self.transformer = transformer.make_transformer_encoder(
-            output_size=2,
-            embedding_dim=hidden_size,
-            num_layers=1,
-            num_heads=4,
-            num_hiddens_per_head=None,
-            use_embeddings=False,
-            return_all_outputs=True,
+        inputs_vbatch = jnp.concatenate(
+            (partitions[:, :1, :], partitions[:, 1:, :].repeat(repeats=self.K, axis=1)),
+            axis=1,
+        ).reshape(-1, cols, dim)
+        states_vbatch = jnp.concatenate(
+            (
+                s0[:, jnp.newaxis, :],
+                keys.reshape(batch_size, num_keys, self.hidden_size),
+            ),
+            axis=1,
+        ).reshape(-1, self.hidden_size)
+        outputs_vbatch, _ = hk.dynamic_unroll(
+            rnn, inputs_vbatch, states_vbatch, time_major=False
         )
 
-    def process(self, x, h0):
-        hx = super().process(x, h0)
-        hx = jnp.reshape(hx, (-1, self.num_branches, self.hidden_size))
-        hx = self.transformer(hx)
-        return jnp.mean(hx, axis=1)
+        values = outputs_vbatch.reshape(batch_size, (num_keys + 1), cols, self.hidden_size)  # type: ignore
+        return values

@@ -178,3 +178,17 @@ cython_debug/
 
 # pyenv files
 .python-version
+
+# wandb files
+wandb/
+
+# log files
+logs/
+
+# result files
+results/
+
+# experiment configs
+experiments/config
+
+.webui_secret_key

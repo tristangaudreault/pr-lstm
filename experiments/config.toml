@@ -1,7 +1,0 @@
-architecture-parameters = [
-    "hidden_size",
-    "memory_cell_size",
-    "memory_size",
-    "num_branches",
-    "num_heads",
-]
