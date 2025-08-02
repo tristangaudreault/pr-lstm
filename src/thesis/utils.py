@@ -44,10 +44,21 @@ def scaled_dot_product_attention(query, key, value):
     d_k = query.shape[-1]
 
     scores = jnp.einsum("bqd,bkd->bqk", query, key)
-    scores = scores / jnp.sqrt(d_k)
+    # scores = scores / jnp.sqrt(d_k)
 
-    attn_weights = jax.nn.softmax(scores, axis=-1)
+    # attn_weights = jax.nn.softmax(scores, axis=-1)
 
-    output = jnp.einsum("bqk,bk...->bq...", attn_weights, value)
+    output = jnp.einsum("bqk,bk...->bq...", scores, value)
 
-    return output, attn_weights
+    return output, scores
+
+
+def add_batch(nest, batch_size: int | None):
+    """
+    Adds a batch dimension at axis 0 to the leaves of a nested structure.
+    References:
+        Copied from:
+        https://github.com/google-deepmind/dm-haiku/blob/main/haiku/_src/recurrent.py#L221
+    """
+    broadcast = lambda x: jnp.broadcast_to(x, (batch_size,) + x.shape)
+    return jax.tree.map(broadcast, nest)

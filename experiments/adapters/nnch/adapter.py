@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 import logging
+from multiprocessing import Process, Pipe
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,8 @@ from neural_networks_chomsky_hierarchy.experiments import (
 from interface import ExperimentAdapter, Logger
 
 from . import cli, wrappers
+
+import cleartrace
 
 
 class NNCH(ExperimentAdapter):
@@ -63,8 +66,11 @@ def init_traning_params(args: dict[str, Any]):
         output_size=task.output_size,
         return_all_outputs=not single_output,
         # **get_model_kwargs(model_builder, args),
+        # hidden_size=8,
     )
-    logger.warning("Model is not getting kwargs from cli arguments, need to implement this.")
+    logger.warning(
+        "Model is not getting kwargs from cli arguments, need to implement this."
+    )
     if args["autoregressive"]:
         if "transformer" not in args["model"]:
             model = utils.make_model_with_targets_as_input(
@@ -136,6 +142,7 @@ def train(training_params, args, logger):
 
 
 def eval(training_params, params, logger):
+
     eval_params = range_evaluation.EvaluationParams(
         model=training_params.model,
         params=params,
@@ -150,5 +157,37 @@ def eval(training_params, params, logger):
         sub_batch_size=training_params.range_test_sub_batch_size,
         is_autoregressive=training_params.is_autoregressive,
     )
+    p = trace(eval_params)
     eval_results = range_evaluation.range_evaluation(eval_params, use_tqdm=False)
+    p.join()
     return eval_results
+
+
+def trace(eval_params, length=10):
+    rng_seq = hk.PRNGSequence(1)
+    batch = eval_params.sample_batch(next(rng_seq), eval_params.sub_batch_size, length)
+
+    apply_fn = cleartrace.trace(eval_params.model.apply)
+    params = eval_params.params
+
+    if eval_params.is_autoregressive:
+        G = apply_fn(
+            params,
+            next(rng_seq),
+            batch["input"],
+            jnp.empty_like(batch["output"]),
+            sample=True,
+        )
+    else:
+        G = apply_fn(params, next(rng_seq), batch["input"])
+
+    parent_conn, child_conn = Pipe()
+    p = Process(
+        target=cleartrace.api_process,
+        args=(child_conn,),
+        daemon=True,
+    )
+    p.start()
+
+    parent_conn.send(G)
+    return p
