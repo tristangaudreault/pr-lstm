@@ -21,27 +21,26 @@ from thesis.utils import (
 class PRNN(hk.RNNCore):
     def __init__(
         self,
-        inner_core: type[hk.RNNCore],
+        inner_core: type[hk.VanillaRNN],
         proj_size: int,
         hidden_size: int,
         name: str = "softmax_rnn",
     ):
         super().__init__(name=name)
         self._inner_core = inner_core
-        self.proj_size = proj_size
         self.hidden_size = hidden_size
+        self.proj_size = proj_size
 
     def __call__(self, inputs, prev_state):
-        prev_state_proj = hk.Linear(self.proj_size)(prev_state)
-        hidden_state_proj, new_state = self._inner_core(self.proj_size)(  # type: ignore
-            inputs, prev_state_proj
+        hidden_state_proj, new_state = self._inner_core(self.hidden_size)(
+            inputs, prev_state
         )
-        logits = hk.Linear(self.hidden_size)(hidden_state_proj)
+        logits = hk.Linear(self.proj_size)(hidden_state_proj)
         probabilites = jnn.softmax(logits, axis=-1)
         return probabilites, probabilites
 
     def initial_state(self, batch_size: int | None):
-        state = jnp.zeros([self.hidden_size])
+        state = jnp.zeros([self.proj_size])
         if batch_size is not None:
             state = add_batch(state, batch_size)
         return state
@@ -67,7 +66,7 @@ class Speculative(hk.Module):
         rows, cols = infer_shape(self.rows, self.cols, seq_len)
         num_keys = rows - 1
 
-        rnn = PRNN(inner_core=hk.VanillaRNN, proj_size=2, hidden_size=2)
+        rnn = PRNN(inner_core=hk.VanillaRNN, hidden_size=8, proj_size=2)
         s0 = rnn.initial_state(batch_size)
 
         partitions = Speculative.partition(x, rows, cols)
