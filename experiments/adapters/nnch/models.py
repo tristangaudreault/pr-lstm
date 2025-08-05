@@ -15,11 +15,9 @@ def make_model(
     **model_kwargs: Any,
 ) -> Callable[[jnp.ndarray], jnp.ndarray]:
     def model(x: jnp.ndarray, input_length: int = 1) -> jnp.ndarray:
-        output = inner_core()(x)
+        output = inner_core(proj_size=output_size, **model_kwargs)(x)
         if not return_all_outputs:
-            output = output[:, -1, :]
-        output = jnp.reshape(output, (x.shape[0], -1))
-        output = jnp.expand_dims(output, axis=1)
+            output = output[:, -1:, :]
 
         return output
 
@@ -28,6 +26,6 @@ def make_model(
 
 constants.MODEL_BUILDERS.update(
     {
-        "speculative": partial(make_model, inner_core=partial(Speculative, hidden_size=16, K=2, rows=None, cols=1)),  # type: ignore
+        "speculative": partial(make_model, inner_core=Speculative),  # type: ignore
     }
 )

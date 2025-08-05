@@ -23,14 +23,14 @@ class Speculative(hk.Module):
     def __init__(
         self,
         hidden_size: int,
-        K: int,
-        rows: int | None = 2,
+        proj_size: int,
+        rows: int | None = None,
         cols: int | None = None,
         name: str | None = None,
     ):
         super().__init__(name=name)
-        self.hidden_size = 2
-        self.K = 2
+        self.hidden_size = hidden_size
+        self.proj_size = proj_size
         self.rows = rows
         self.cols = cols
 
@@ -38,12 +38,16 @@ class Speculative(hk.Module):
         batch_size, seq_len, _ = x.shape
         rows, cols = infer_shape(self.rows, self.cols, seq_len)
 
-        rnn = PRNN(inner_core=hk.VanillaRNN, hidden_size=8, proj_size=2)
+        rnn = PRNN(
+            inner_core=hk.VanillaRNN,
+            hidden_size=self.hidden_size,
+            proj_size=self.proj_size,
+        )
         s0 = rnn.initial_state(batch_size)
 
         partitions = partition(x, rows, cols)
-        keys = generate_keys(batch_size, rows, self.hidden_size, s0)
-        values = unroll_keys(rnn, keys, partitions, self.K)
+        keys = generate_keys(batch_size, rows, self.proj_size, s0)
+        values = unroll_keys(rnn, keys, partitions, self.proj_size)
         ys = refine(keys, values)
         ys = assemble_output(ys, seq_len)
 
@@ -58,16 +62,16 @@ def partition(x: jnp.ndarray, rows, cols) -> jnp.ndarray:
 
 @cleartrace.traced
 def generate_keys(
-    batch_size: int, rows: int, hidden_size: int, s0: jnp.ndarray
+    batch_size: int, rows: int, proj_size: int, s0: jnp.ndarray
 ) -> jnp.ndarray:
     s0_expanded = s0[:, jnp.newaxis, jnp.newaxis, :]
     s0_broadcasted = jnp.broadcast_to(
-        s0_expanded, (batch_size, 1, hidden_size, hidden_size)
+        s0_expanded, (batch_size, 1, proj_size, proj_size)
     )
 
-    eye = jnp.eye(hidden_size)
+    eye = jnp.eye(proj_size)
     eye_broadcasted = jnp.broadcast_to(
-        eye, (batch_size, rows - 1, hidden_size, hidden_size)
+        eye, (batch_size, rows - 1, proj_size, proj_size)
     )
 
     keys = jnp.concatenate((s0_broadcasted, eye_broadcasted), axis=1)

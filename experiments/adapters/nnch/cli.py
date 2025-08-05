@@ -19,6 +19,7 @@ def add_arguments(parser: ArgumentParser):
         default=1_000,
         help="number iterations between log entries",
     )
+    parser.add_argument("--cleartrace", action="store_true", help="serve a cleartrace API after training")
 
     # Experiment
     parser.add_argument(
@@ -120,10 +121,13 @@ def add_arguments(parser: ArgumentParser):
     )
     parser.add_argument("--num-heads", type=int, help="number of attention heads")
 
-    # Chorus
+    # Speculative
+    # parser.add_argument(
+    #     "--proj-size", type=int, help="size of the probability space projection"
+    # )
     parser.add_argument(
-        "--rows", type=int, help="number of rows in chorus reshape operation"
+        "--rows", type=int, default=None, help="number of partition rows"
     )
     parser.add_argument(
-        "--cols", type=int, help="number of columns in chorus reshape operation"
+        "--cols", type=int, default=1, help="number of partition columns"
     )
