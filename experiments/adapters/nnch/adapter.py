@@ -49,10 +49,7 @@ class NNCH(ExperimentAdapter):
 def filter_kwargs(model_builder, kwargs) -> dict:
     filtered_keys = []
     if isinstance(model_builder, partial):
-        if (
-            model_builder.func is make_rnn
-            or model_builder.func is models.make_model
-        ):
+        if model_builder.func is make_rnn or model_builder.func is models.make_model:
             for inner_model_key in ("rnn_core", "inner_core"):
                 inner_model = model_builder.keywords.get(inner_model_key)
                 if inner_model is not None:
@@ -167,15 +164,17 @@ def eval(training_params, params, logger):
         sub_batch_size=training_params.range_test_sub_batch_size,
         is_autoregressive=training_params.is_autoregressive,
     )
-    
+
     eval_results = range_evaluation.range_evaluation(eval_params, use_tqdm=False)
-    
+
     return eval_results
 
 
 def trace(training_params, length=10):
     rng_seq = hk.PRNGSequence(1)
-    batch = training_params.sample_batch(next(rng_seq), training_params.sub_batch_size, length)
+    batch = training_params.sample_batch(
+        next(rng_seq), training_params.sub_batch_size, length
+    )
 
     apply_fn = cleartrace.trace(training_params.model.apply)
     params = training_params.params
