@@ -54,9 +54,10 @@ def add_arguments(parser: ArgumentParser):
     parser.add_argument(
         "-N",
         "--training-range",
+        "--max-training-range",
         type=int,
         default=40,
-        help="maximum training sequence length",
+        help="maximum training sequence length (inclusive)",
     )
     parser.add_argument(
         "-M",
