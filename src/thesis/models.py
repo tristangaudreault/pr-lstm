@@ -14,6 +14,7 @@ import cleartrace
 from thesis.utils import (
     infer_shape,
     reshape_with_padding,
+    apply_attn_weights,
     scaled_dot_product_attention,
     add_batch,
 )
@@ -48,7 +49,7 @@ class Speculative(hk.Module):
         partitions = partition(x, rows, cols)
         keys = generate_keys(batch_size, rows, self.proj_size, s0)
         values = unroll_keys(rnn, keys, partitions, self.proj_size)
-        ys = refine(keys, values)
+        ys = refine(values)
         ys = assemble_output(ys, seq_len)
 
         return ys
@@ -100,17 +101,16 @@ def unroll_keys(
 
 
 @cleartrace.traced
-def refine(keys: jnp.ndarray, values: jnp.ndarray):
+def refine(values: jnp.ndarray):
     def attend(a: jnp.ndarray, b: jnp.ndarray):
-        k_a, v_a = a
-        key, value = b
-        query = v_a[:, :, :, -1, :]
-        new_value, _ = scaled_dot_product_attention(query, key, value)
-        return k_a, new_value
-
-    _, ys = jax.lax.associative_scan(
+        query = a[:, :, :, -1, :]
+        value = b
+        new_value = apply_attn_weights(query, value)
+        return new_value
+    
+    ys = jax.lax.associative_scan(
         attend,
-        (keys, values),
+        values,
         axis=1,
     )
     ys = ys[:, 1:, 0, :, :]
