@@ -17,7 +17,7 @@ import adapters  # Load all adapters
 from control import get_adapter_map, parse_args
 
 
-def test_logger(
+def vanilla_logger(
     log_data: dict[str, Any], step: int | None = None, commit: bool | None = None
 ):
     if next(iter(log_data)).startswith("train/"):
@@ -41,8 +41,9 @@ def main():
     adapter = adapter_map[args["adapter"]]
 
     with ExitStack() as stack:
-        config, logger = args, test_logger
-        if args["wandb"]:
+        config, logger = args, None
+        logger_key = args.get("logger")
+        if logger_key == "wandb":
             import wandb
 
             run = stack.enter_context(
@@ -53,6 +54,8 @@ def main():
                 )  # type: ignore
             )
             config, logger = run.config, run.log
+        elif logger_key == "vanilla":
+            logger = vanilla_logger
 
         train_results, eval_results, params = adapter.run(config, logger)
         if args["save_model"] is not None:
