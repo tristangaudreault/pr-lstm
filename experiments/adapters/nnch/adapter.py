@@ -39,7 +39,7 @@ class NNCH(ExperimentAdapter):
         training_params = init_traning_params(args)
         results, params = train(training_params, args, logger)
         if args.get("cleartrace"):
-            p = trace(training_params)
+            p = trace(training_params, params)
         eval_results = eval(training_params, params, logger)
         if args.get("cleartrace"):
             p.join()
@@ -170,14 +170,13 @@ def eval(training_params, params, logger):
     return eval_results
 
 
-def trace(training_params, length=10):
+def trace(training_params, params, length=10):
     rng_seq = hk.PRNGSequence(1)
-    batch = training_params.sample_batch(
-        next(rng_seq), training_params.sub_batch_size, length
+    batch = training_params.task.sample_batch(
+        next(rng_seq), training_params.batch_size, length
     )
 
     apply_fn = cleartrace.trace(training_params.model.apply)
-    params = training_params.params
 
     if training_params.is_autoregressive:
         G = apply_fn(
