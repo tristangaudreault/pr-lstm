@@ -33,21 +33,31 @@ def reshape_with_padding(x: jnp.ndarray, rows: int, cols: int) -> jnp.ndarray:
     return rearrange(x, pattern, rows=rows)
 
 
-def prepend_cls(x: jnp.ndarray):
-    x = jnp.pad(x, ((0, 0), (0, 0), (0, 1)))
-    cls = jax.nn.one_hot(x.shape[2] - 1, x.shape[2])
-    cls = jnp.broadcast_to(cls, (x.shape[0], 1, x.shape[2]))
-    return jnp.concatenate((cls, x), axis=1)
+def get_attn_weights(query, key):
+    d_k = query.shape[-1]
+
+    scores = jnp.einsum("...qd,...kd->...qk", query, key)
+    # scores = scores / jnp.sqrt(d_k)
+    # attn_weights = jax.nn.softmax(scores, axis=-1)
+    return scores
+
+
+def apply_attn_weights(attn_weights, value):
+    return jnp.einsum("...qk,...kch->...qch", attn_weights, value)
 
 
 def scaled_dot_product_attention(query, key, value):
-    d_k = query.shape[-1]
-
-    scores = jnp.einsum("bqd,bkd->bqk", query, key)
-    scores = scores / jnp.sqrt(d_k)
-
-    attn_weights = jax.nn.softmax(scores, axis=-1)
-
-    output = jnp.einsum("bqk,bk...->bq...", attn_weights, value)
-
+    attn_weights = get_attn_weights(query, key)
+    output = apply_attn_weights(attn_weights, value)
     return output, attn_weights
+
+
+def add_batch(nest, batch_size: int | None):
+    """
+    Adds a batch dimension at axis 0 to the leaves of a nested structure.
+    References:
+        Copied from:
+        https://github.com/google-deepmind/dm-haiku/blob/main/haiku/_src/recurrent.py#L221
+    """
+    broadcast = lambda x: jnp.broadcast_to(x, (batch_size,) + x.shape)
+    return jax.tree.map(broadcast, nest)

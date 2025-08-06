@@ -6,6 +6,8 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 import logging
+from multiprocessing import Process, Pipe
+from functools import partial
 
 logger = logging.getLogger(__name__)
 
@@ -18,10 +20,13 @@ from neural_networks_chomsky_hierarchy.experiments import (
     training,
     utils,
 )
+from neural_networks_chomsky_hierarchy.models.rnn import make_rnn
 
 from interface import ExperimentAdapter, Logger
 
-from . import cli, wrappers
+from . import cli, wrappers, models
+
+import cleartrace
 
 
 class NNCH(ExperimentAdapter):
@@ -33,20 +38,29 @@ class NNCH(ExperimentAdapter):
     def run(args: dict[str, Any], logger: Logger | None) -> Any:
         training_params = init_traning_params(args)
         results, params = train(training_params, args, logger)
+        if args.get("cleartrace"):
+            p = trace(training_params)
         eval_results = eval(training_params, params, logger)
+        if args.get("cleartrace"):
+            p.join()
         return results, eval_results, params
 
 
-def get_model_kwargs(model_builder, args):
-    attributes = ("rnn_core", "inner_core", None)
-    names = []
-    func = model_builder
-    for attribute in attributes:
-        if func:
-            sig = inspect.signature(func)
-            names.extend([param.name for param in sig.parameters.values()])
-        func = model_builder.keywords.get(attribute)
-    return {k: v for k, v in args.items() if k in names and v is not None}
+def filter_kwargs(model_builder, kwargs) -> dict:
+    filtered_keys = []
+    if isinstance(model_builder, partial):
+        if model_builder.func is make_rnn or model_builder.func is models.make_model:
+            for inner_model_key in ("rnn_core", "inner_core"):
+                inner_model = model_builder.keywords.get(inner_model_key)
+                if inner_model is not None:
+                    sig = inspect.signature(inner_model)
+                    filtered_keys.extend(sig.parameters.keys())
+    else:
+        sig = inspect.signature(model_builder)
+        filtered_keys.extend(sig.parameters.keys())
+    filtered_kwargs = {k: v for k, v in kwargs.items() if k in filtered_keys}
+
+    return filtered_kwargs
 
 
 def init_traning_params(args: dict[str, Any]):
@@ -61,10 +75,9 @@ def init_traning_params(args: dict[str, Any]):
     model_builder = constants.MODEL_BUILDERS[args["model"]]
     model = model_builder(
         output_size=task.output_size,
-        return_all_outputs=not single_output,
-        # **get_model_kwargs(model_builder, args),
+        return_all_outputs=True,
+        **filter_kwargs(model_builder, args),
     )
-    logger.warning("Model is not getting kwargs from cli arguments, need to implement this.")
     if args["autoregressive"]:
         if "transformer" not in args["model"]:
             model = utils.make_model_with_targets_as_input(
@@ -136,6 +149,7 @@ def train(training_params, args, logger):
 
 
 def eval(training_params, params, logger):
+
     eval_params = range_evaluation.EvaluationParams(
         model=training_params.model,
         params=params,
@@ -150,5 +164,39 @@ def eval(training_params, params, logger):
         sub_batch_size=training_params.range_test_sub_batch_size,
         is_autoregressive=training_params.is_autoregressive,
     )
+
     eval_results = range_evaluation.range_evaluation(eval_params, use_tqdm=False)
+
     return eval_results
+
+
+def trace(training_params, length=10):
+    rng_seq = hk.PRNGSequence(1)
+    batch = training_params.sample_batch(
+        next(rng_seq), training_params.sub_batch_size, length
+    )
+
+    apply_fn = cleartrace.trace(training_params.model.apply)
+    params = training_params.params
+
+    if training_params.is_autoregressive:
+        G = apply_fn(
+            params,
+            next(rng_seq),
+            batch["input"],
+            jnp.empty_like(batch["output"]),
+            sample=True,
+        )
+    else:
+        G = apply_fn(params, next(rng_seq), batch["input"])
+
+    parent_conn, child_conn = Pipe()
+    p = Process(
+        target=cleartrace.api_process,
+        args=(child_conn,),
+        daemon=True,
+    )
+    p.start()
+
+    parent_conn.send(G)
+    return p

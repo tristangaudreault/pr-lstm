@@ -30,9 +30,11 @@ def parse_args(adapter_map: dict[str, type[ExperimentAdapter]]) -> Namespace:
     parser.add_argument("--load-model", type=Path, help="path to load model parameters")
 
     # Reporting framework
-    report_framework_group = parser.add_mutually_exclusive_group()
-    report_framework_group.add_argument(
-        "--wandb", action="store_true", help="enables the use of Weights and Biases"
+    parser.add_argument(
+        "--logger",
+        default="none",
+        choices=["vanilla", "none", "wandb"],
+        help="logging framework to use",
     )
 
     for name, adapter in adapter_map.items():
