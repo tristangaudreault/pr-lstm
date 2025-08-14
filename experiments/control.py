@@ -31,7 +31,7 @@ def parse_args(adapter_map: dict[str, type[ExperimentAdapter]]) -> Namespace:
 
     # Reporting framework
     parser.add_argument(
-        "--logger",
+        "--log",
         default="none",
         choices=["vanilla", "none", "wandb"],
         help="logging framework to use",

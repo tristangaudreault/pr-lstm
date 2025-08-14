@@ -23,7 +23,7 @@ def add_arguments(parser: ArgumentParser):
 
     # Experiment
     parser.add_argument(
-        "--task",
+        "--task-name",
         type=str,
         choices=constants.TASK_BUILDERS.keys(),
         default="even_pairs",
@@ -80,7 +80,7 @@ def add_arguments(parser: ArgumentParser):
 
     # Models
     parser.add_argument(
-        "--model",
+        "--model-name",
         type=str,
         choices=constants.MODEL_BUILDERS.keys(),
         default="tape_rnn",
@@ -123,10 +123,6 @@ def add_arguments(parser: ArgumentParser):
     parser.add_argument("--num-heads", type=int, help="number of attention heads")
 
     # Speculative
-    # parser.add_argument(
-    #     "--proj-size", type=int, help="size of the probability space projection"
-    # )
-    parser.add_argument("--temperature", type=float, default=1, help="temperature of softmax")
     parser.add_argument(
         "--rows", type=int, default=None, help="number of partition rows"
     )

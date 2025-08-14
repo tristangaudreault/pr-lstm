@@ -42,8 +42,8 @@ def main():
 
     with ExitStack() as stack:
         config, logger = args, None
-        logger_key = args.get("logger")
-        if logger_key == "wandb":
+        log = args.get("log")
+        if log == "wandb":
             import wandb
 
             run = stack.enter_context(
@@ -54,10 +54,10 @@ def main():
                 )  # type: ignore
             )
             config, logger = run.config, run.log
-        elif logger_key == "vanilla":
+        elif log == "vanilla":
             logger = vanilla_logger
 
-        train_results, eval_results, params = adapter.run(config, logger)
+        train_results, eval_results, params = adapter.run(**config, logger=logger)
         if args["save_model"] is not None:
             with open(args["save_model"], "wb") as f:
                 pickle.dump(params, f)
