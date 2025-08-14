@@ -133,17 +133,7 @@ def init_traning_params(args: dict[str, Any]):
 
 def train(training_params, args, logger):
     training_worker = training.TrainingWorker(training_params, use_tqdm=True)
-    with ExitStack() as stack:
-        if logger is not None:
-            stack.enter_context(
-                patch(
-                    "neural_networks_chomsky_hierarchy.experiments.training._update_parameters",
-                    new=wrappers.wrap_update_parameters(
-                        training._update_parameters, logger, args["log_frequency"]
-                    ),
-                )
-            )
-        results, _, params = training_worker.run()
+    results, _, params = training_worker.run()
 
     return results, params
 
