@@ -1,17 +1,17 @@
 from argparse import ArgumentParser, Namespace
 from pathlib import Path
 
-from interface import ExperimentAdapter
+from interface import Adapter
 
 
-def get_adapter_map() -> dict[str, type[ExperimentAdapter]]:
+def get_adapter_map() -> dict[str, type[Adapter]]:
     return {
         adapter.__name__.lower(): adapter
-        for adapter in ExperimentAdapter.__subclasses__()
+        for adapter in Adapter.__subclasses__()
     }
 
 
-def parse_args(adapter_map: dict[str, type[ExperimentAdapter]]) -> Namespace:
+def parse_args(adapter_map: dict[str, type[Adapter]]) -> Namespace:
     parser = ArgumentParser()
     subparsers = parser.add_subparsers(
         dest="adapter",

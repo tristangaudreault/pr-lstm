@@ -1,19 +1,19 @@
 import pickle
-from typing import Any
+from typing import Any, Callable, cast
 import logging
 
 logger = logging.getLogger(__name__)
 
-from haiku import Transformed
+from haiku import Transformed, MutableParams
 
-from interface import ExperimentAdapter, Logger
+from interface import Adapter, Logger
 
 from .cli import add_arguments
 from .training import create_traning_params, train
 from .evaluation import evaluate, trace
 
 
-class NNCH(ExperimentAdapter):
+class NNCH(Adapter):
     add_arguments = staticmethod(add_arguments)
 
     @staticmethod
@@ -25,7 +25,8 @@ class NNCH(ExperimentAdapter):
             with open(load_model, "rb") as f:
                 params = pickle.load(f)
             training_params.model = Transformed(
-                lambda _: params, training_params.model.apply
+                lambda *_, **__: cast(MutableParams, params),
+                training_params.model.apply,
             )
 
             training_params.training_steps = 0
