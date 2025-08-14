@@ -126,6 +126,7 @@ def add_arguments(parser: ArgumentParser):
     # parser.add_argument(
     #     "--proj-size", type=int, help="size of the probability space projection"
     # )
+    parser.add_argument("--temperature", type=float, default=1, help="temperature of softmax")
     parser.add_argument(
         "--rows", type=int, default=None, help="number of partition rows"
     )

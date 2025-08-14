@@ -33,22 +33,14 @@ def reshape_with_padding(x: jnp.ndarray, rows: int, cols: int) -> jnp.ndarray:
     return rearrange(x, pattern, rows=rows)
 
 
-def get_attn_weights(query, key):
+def scaled_dot_product_attention(query, key, value, temperature=1):
     d_k = query.shape[-1]
 
     scores = jnp.einsum("...qd,...kd->...qk", query, key)
-    # scores = scores / jnp.sqrt(d_k)
-    # attn_weights = jax.nn.softmax(scores, axis=-1)
-    return scores
+    scaled_scores = scores / (jnp.sqrt(d_k) * temperature)
+    attn_weights = jax.nn.softmax(scaled_scores)
 
-
-def apply_attn_weights(attn_weights, value):
-    return jnp.einsum("...qk,...kch->...qch", attn_weights, value)
-
-
-def scaled_dot_product_attention(query, key, value):
-    attn_weights = get_attn_weights(query, key)
-    output = apply_attn_weights(attn_weights, value)
+    output = jnp.einsum("...qk,...kch->...qch", attn_weights, value)
     return output, attn_weights
 
 

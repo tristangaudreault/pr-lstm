@@ -14,7 +14,6 @@ import cleartrace
 from thesis.utils import (
     infer_shape,
     reshape_with_padding,
-    apply_attn_weights,
     scaled_dot_product_attention,
     add_batch,
 )
@@ -27,6 +26,7 @@ class Speculative(hk.Module):
         proj_size: int,
         rows: int | None = None,
         cols: int | None = None,
+        temperature: int = 1,
         name: str | None = None,
     ):
         super().__init__(name=name)
@@ -34,6 +34,7 @@ class Speculative(hk.Module):
         self.proj_size = proj_size
         self.rows = rows
         self.cols = cols
+        self.temperature = temperature
 
     def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
         batch_size, seq_len, _ = x.shape
@@ -49,14 +50,14 @@ class Speculative(hk.Module):
         partitions = partition(x, rows, cols)
         keys = generate_keys(batch_size, rows, self.proj_size, s0)
         values = unroll_keys(rnn, keys, partitions, self.proj_size)
-        ys = refine(values)
+        ys = refine(keys, values, self.temperature)
         ys = assemble_output(ys, seq_len)
 
         return ys
 
 
 @cleartrace.traced
-def partition(x: jnp.ndarray, rows, cols) -> jnp.ndarray:
+def partition(x: jnp.ndarray, rows: int, cols: int) -> jnp.ndarray:
     partitions = reshape_with_padding(x, rows, cols)
     return partitions
 
@@ -101,16 +102,19 @@ def unroll_keys(
 
 
 @cleartrace.traced
-def refine(values: jnp.ndarray):
+def refine(keys: jnp.ndarray, values: jnp.ndarray, temperature: int):
     def attend(a: jnp.ndarray, b: jnp.ndarray):
-        query = a[:, :, :, -1, :]
-        value = b
-        new_value = apply_attn_weights(query, value)
-        return new_value
-    
-    ys = jax.lax.associative_scan(
+        key_a, value_a = a
+        query = value_a[:, :, :, -1, :]
+        key, value = b
+        new_value, _ = scaled_dot_product_attention(
+            query, key, value, temperature=temperature
+        )
+        return key_a, new_value
+
+    _, ys = jax.lax.associative_scan(
         attend,
-        values,
+        (keys, values),
         axis=1,
     )
     ys = ys[:, 1:, 0, :, :]
