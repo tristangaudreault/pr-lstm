@@ -1,5 +1,5 @@
 import pickle
-from typing import Any, Callable, cast
+from typing import Any, cast
 import logging
 
 logger = logging.getLogger(__name__)
