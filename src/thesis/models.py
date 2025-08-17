@@ -117,7 +117,7 @@ def refine(keys: jnp.ndarray, values: jnp.ndarray, temperature: int):
         (keys, values),
         axis=1,
     )
-    ys = ys[:, 1:, 0, :, :]
+    ys = ys[:, :, 0, :, :]
     return ys
 
 
