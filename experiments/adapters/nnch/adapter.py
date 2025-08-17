@@ -34,9 +34,10 @@ class NNCH(Adapter):
         results, params = train(training_params, **kwargs, logger=logger)
 
         if cleartrace:
-            p = trace(training_params, params)
-        eval_results = evaluate(training_params, params, logger=logger)
-        if cleartrace:
+            p = trace(training_params, params, length=10)
             p.join()
+            return
+
+        eval_results = evaluate(training_params, params, logger=logger)            
 
         return results, eval_results, params
