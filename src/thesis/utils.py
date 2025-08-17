@@ -1,4 +1,5 @@
 import math
+from typing import Any
 
 import jax.nn
 import jax.numpy as jnp
@@ -9,7 +10,7 @@ def ceil_division(numerator: int, denominator: int) -> int:
     return -(-numerator // denominator)
 
 
-def infer_shape(rows, cols, sequence_length: int) -> tuple[int, int]:
+def infer_shape(rows: int, cols: int, sequence_length: int) -> tuple[int, int]:
     if rows is None and cols is None:
         side = math.ceil(math.sqrt(sequence_length))
         return side, side
@@ -33,7 +34,9 @@ def reshape_with_padding(x: jnp.ndarray, rows: int, cols: int) -> jnp.ndarray:
     return rearrange(x, pattern, rows=rows)
 
 
-def scaled_dot_product_attention(query, key, value, temperature=1):
+def scaled_dot_product_attention(
+    query: jnp.ndarray, key: jnp.ndarray, value: jnp.ndarray, temperature: float = 1.0
+):
     d_k = query.shape[-1]
 
     scores = jnp.einsum("...qd,...kd->...qk", query, key)
@@ -44,7 +47,7 @@ def scaled_dot_product_attention(query, key, value, temperature=1):
     return output, attn_weights
 
 
-def add_batch(nest, batch_size: int | None):
+def add_batch(nest: Any, batch_size: int | None):
     """
     Adds a batch dimension at axis 0 to the leaves of a nested structure.
     References:
