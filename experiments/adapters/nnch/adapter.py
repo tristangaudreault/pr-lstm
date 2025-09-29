@@ -1,16 +1,13 @@
-import pickle
-from typing import Any, cast
+from typing import Any
 import logging
-
-logger = logging.getLogger(__name__)
-
-from haiku import Transformed, MutableParams
 
 from interface import Adapter, Logger
 
 from .cli import add_arguments
 from .training import create_traning_params, train
 from .evaluation import evaluate, trace
+
+logger = logging.getLogger(__name__)
 
 
 class NNCH(Adapter):
@@ -21,23 +18,16 @@ class NNCH(Adapter):
         logger: Logger | None, load_model: str | None, cleartrace: bool, **kwargs
     ) -> Any:
         training_params = create_traning_params(**kwargs)
-        if load_model is not None:
-            with open(load_model, "rb") as f:
-                params = pickle.load(f)
-            training_params.model = Transformed(
-                lambda *_, **__: cast(MutableParams, params),
-                training_params.model.apply,
-            )
+        results, params, state = train(training_params, **kwargs, logger=logger)
 
-            training_params.training_steps = 0
-
-        results, params = train(training_params, **kwargs, logger=logger)
+        if kwargs["model_name"] == "speculative":
+            state["speculative"]["temperature"] = 1e-6
 
         if cleartrace:
-            p = trace(training_params, params, length=10)
+            p = trace(training_params, params, state, length=8)
             p.join()
             return
 
-        eval_results = evaluate(training_params, params, logger=logger)            
+        eval_results = evaluate(training_params, params, state, logger=logger)
 
         return results, eval_results, params

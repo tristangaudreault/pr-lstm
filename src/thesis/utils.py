@@ -10,18 +10,21 @@ def ceil_division(numerator: int, denominator: int) -> int:
     return -(-numerator // denominator)
 
 
-def infer_shape(rows: int, cols: int, sequence_length: int) -> tuple[int, int]:
+def infer_shape(
+    rows: int | None, cols: int | None, sequence_length: int
+) -> tuple[int, int]:
+    if rows is not None and cols is not None:
+        return rows, cols
+
+    if rows is not None:
+        return rows, ceil_division(sequence_length, rows)
+
+    if cols is not None:
+        return ceil_division(sequence_length, cols), cols
+
     if rows is None and cols is None:
         side = math.ceil(math.sqrt(sequence_length))
         return side, side
-
-    if rows is None:
-        return ceil_division(sequence_length, cols), cols
-
-    if cols is None:
-        return rows, ceil_division(sequence_length, rows)
-
-    return rows, cols
 
 
 def reshape_with_padding(x: jnp.ndarray, rows: int, cols: int) -> jnp.ndarray:
@@ -35,12 +38,14 @@ def reshape_with_padding(x: jnp.ndarray, rows: int, cols: int) -> jnp.ndarray:
 
 
 def scaled_dot_product_attention(
-    query: jnp.ndarray, key: jnp.ndarray, value: jnp.ndarray, temperature: float = 1.0
+    query: jnp.ndarray, key: jnp.ndarray, value: jnp.ndarray, temperature: jnp.ndarray
 ):
     d_k = query.shape[-1]
 
-    scores = jnp.einsum("...qd,...kd->...qk", query, key)
-    scaled_scores = scores / (jnp.sqrt(d_k) * temperature)
+    scores = jnp.linalg.norm(
+        query[:, :, :, jnp.newaxis, :] - key[:, :, jnp.newaxis, :], axis=-1
+    )
+    scaled_scores = - scores / temperature
     attn_weights = jax.nn.softmax(scaled_scores)
 
     output = jnp.einsum("...qk,...kch->...qch", attn_weights, value)

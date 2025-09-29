@@ -19,7 +19,11 @@ def add_arguments(parser: ArgumentParser):
         default=1_000,
         help="number iterations between log entries",
     )
-    parser.add_argument("--cleartrace", action="store_true", help="serve a cleartrace API after training")
+    parser.add_argument(
+        "--cleartrace",
+        action="store_true",
+        help="serve a cleartrace API after training",
+    )
 
     # Experiment
     parser.add_argument(
@@ -52,7 +56,6 @@ def add_arguments(parser: ArgumentParser):
         help="minimum length of training sequences",
     )
     parser.add_argument(
-        "-N",
         "--training-range",
         "--max-training-range",
         type=int,
@@ -60,7 +63,6 @@ def add_arguments(parser: ArgumentParser):
         help="maximum training sequence length (inclusive)",
     )
     parser.add_argument(
-        "-M",
         "--testing-range",
         type=int,
         default=500,
@@ -123,9 +125,5 @@ def add_arguments(parser: ArgumentParser):
     parser.add_argument("--num-heads", type=int, help="number of attention heads")
 
     # Speculative
-    parser.add_argument(
-        "--rows", type=int, default=None, help="number of partition rows"
-    )
-    parser.add_argument(
-        "--cols", type=int, default=1, help="number of partition columns"
-    )
+    parser.add_argument("-M", type=int, default=2, help="time steps between initial speculations")
+    parser.add_argument("-K", type=int, default=None, help="number of speculations")

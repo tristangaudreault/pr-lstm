@@ -12,10 +12,8 @@ from einops import rearrange
 import cleartrace
 
 from thesis.utils import (
-    infer_shape,
     reshape_with_padding,
     scaled_dot_product_attention,
-    add_batch,
 )
 
 
@@ -23,135 +21,111 @@ class Speculative(hk.Module):
     def __init__(
         self,
         hidden_size: int,
-        proj_size: int,
-        rows: int | None = None,
-        cols: int | None = None,
-        temperature: int = 1,
+        M: int,
+        K: int,
         name: str | None = None,
     ):
         super().__init__(name=name)
         self.hidden_size = hidden_size
-        self.proj_size = proj_size
-        self.rows = rows
-        self.cols = cols
-        self.temperature = temperature
+        self.M = M
+        self.K = K
 
     def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
         batch_size, seq_len, _ = x.shape
-        rows, cols = infer_shape(self.rows, self.cols, seq_len)
+        N = -(-seq_len // self.M)
 
-        rnn = PRNN(
-            inner_core=hk.VanillaRNN,
+        rnn = hk.VanillaRNN(
             hidden_size=self.hidden_size,
-            proj_size=self.proj_size,
         )
-        s0 = rnn.initial_state(batch_size)
 
-        partitions = partition(x, rows, cols)
-        keys = generate_keys(batch_size, rows, self.proj_size, s0)
-        values = unroll_keys(rnn, keys, partitions, self.proj_size)
-        ys = refine(keys, values, self.temperature)
-        ys = assemble_output(ys, seq_len)
+        temperature = hk.get_state(
+            "temperature",
+            shape=(),
+            dtype=jnp.float32,
+            init=hk.initializers.Constant(2.0),
+        )
+
+        X_cal = get_X_cal(x, N, self.M, self.K)
+        S_cal = get_S_cal(batch_size, N, self.K, self.hidden_size)
+
+        H = g(
+            rnn,
+            X_cal,
+            S_cal,
+        )
+        ys = scan(H, temperature=temperature)
+
+        ys = transform_outputs(ys, seq_len)
 
         return ys
 
 
 @cleartrace.traced
-def partition(x: jnp.ndarray, rows: int, cols: int) -> jnp.ndarray:
-    partitions = reshape_with_padding(x, rows, cols)
-    return partitions
+def get_X_cal(x: jnp.ndarray, N: int, M: int, K: int) -> jnp.ndarray:
+    batch_size, _, embed_dim = x.shape
+
+    reshaped = reshape_with_padding(x, N, M)
+    expanded = reshaped[:, :, jnp.newaxis, :, :]
+    broadcasted = jnp.broadcast_to(
+        expanded,
+        (batch_size, N, K, M, embed_dim),
+    )
+    X_cal = broadcasted.transpose(3, 0, 1, 2, 4)
+
+    return X_cal
+
+
+def get_S_cal(batch_size: int, N: int, K: int, hidden_size: int):
+    raw = hk.get_parameter(
+        "S", shape=(K, hidden_size), init=hk.initializers.RandomUniform()
+    )
+    expanded = raw[jnp.newaxis, jnp.newaxis, :, :]
+    S_cal = jnp.broadcast_to(expanded, (batch_size, N - 1, K, hidden_size))
+    S_cal = jnp.pad(S_cal, ((0, 0), (1, 0), (0, 0), (0, 0)))
+
+    return S_cal
 
 
 @cleartrace.traced
-def generate_keys(
-    batch_size: int, rows: int, proj_size: int, s0: jnp.ndarray
-) -> jnp.ndarray:
-    s0_expanded = s0[:, jnp.newaxis, jnp.newaxis, :]
-    s0_broadcasted = jnp.broadcast_to(
-        s0_expanded, (batch_size, 1, proj_size, proj_size)
-    )
-
-    eye = jnp.eye(proj_size)
-    eye_broadcasted = jnp.broadcast_to(
-        eye, (batch_size, rows - 1, proj_size, proj_size)
-    )
-
-    keys = jnp.concatenate((s0_broadcasted, eye_broadcasted), axis=1)
-    return keys
-
-
-@cleartrace.traced
-def unroll_keys(
+def g(
     rnn: hk.RNNCore,
-    keys: jnp.ndarray,
-    partitions: jnp.ndarray,
-    K: int,
-) -> jnp.ndarray:
-    batch_size, rows, cols, dim = partitions.shape
+    X_cal: jnp.ndarray,
+    S_cal: jnp.ndarray,
+) -> tuple[jnp.ndarray, jnp.ndarray]:
+    X_vbatch = X_cal.reshape(X_cal.shape[0], -1, X_cal.shape[-1])
+    S_vbatch = S_cal.reshape(-1, S_cal.shape[-1])
 
-    inputs = jnp.broadcast_to(
-        partitions[:, :, jnp.newaxis, :, :], (batch_size, rows, K, cols, dim)
-    ).transpose(3, 0, 1, 2, 4)
-    states = keys
-
-    outputs, _ = hk.dynamic_unroll(rnn, inputs, states)
-
-    outputs = cast(jnp.ndarray, outputs)
-    values = outputs.transpose(1, 2, 3, 0, 4)
-    return values
+    outputs_vbatch, _ = hk.dynamic_unroll(rnn, X_vbatch, S_vbatch)
+    outputs_vbatch = cast(jnp.ndarray, outputs_vbatch)
+    outputs = outputs_vbatch.reshape(X_cal.shape[0], *S_cal.shape)
+    transposed_outputs = outputs.transpose(1, 2, 3, 0, 4)
+    return (S_cal, transposed_outputs)
 
 
 @cleartrace.traced
-def refine(keys: jnp.ndarray, values: jnp.ndarray, temperature: int):
-    def attend(a: jnp.ndarray, b: jnp.ndarray):
-        key_a, value_a = a
+def scan(H: tuple[jnp.ndarray, jnp.ndarray], temperature: jnp.ndarray):
+    def compose(h_a: jnp.ndarray, h_b: jnp.ndarray):
+        key_a, value_a = h_a
         query = value_a[:, :, :, -1, :]
-        key, value = b
-        new_value, _ = scaled_dot_product_attention(
+        key, value = h_b
+        new_value, attn_weights = scaled_dot_product_attention(
             query, key, value, temperature=temperature
         )
         return key_a, new_value
 
-    _, ys = jax.lax.associative_scan(
-        attend,
-        (keys, values),
+    _, raw_ys = jax.lax.associative_scan(
+        compose,
+        H,
         axis=1,
     )
-    ys = ys[:, :, 0, :, :]
+    ys = jnp.take(raw_ys, 0, axis=2)
+
     return ys
 
 
 @cleartrace.traced
-def assemble_output(ys: jnp.ndarray, seq_len: int):
+def transform_outputs(ys: jnp.ndarray, seq_len: int):
     ys = rearrange(ys, "b r c h -> b (r c) h")
     ys = ys[:, :seq_len, :]
 
     return ys
-
-
-class PRNN(hk.RNNCore):
-    def __init__(
-        self,
-        inner_core: type[hk.VanillaRNN],
-        proj_size: int,
-        hidden_size: int,
-        name: str = "softmax_rnn",
-    ):
-        super().__init__(name=name)
-        self._inner_core = inner_core
-        self.hidden_size = hidden_size
-        self.proj_size = proj_size
-
-    def __call__(self, inputs, prev_state):
-        hidden_state_proj, new_state = self._inner_core(self.hidden_size)(
-            inputs, prev_state
-        )
-        logits = hk.Linear(self.proj_size)(hidden_state_proj)
-        probabilites = jnn.softmax(logits, axis=-1)
-        return probabilites, probabilites
-
-    def initial_state(self, batch_size: int | None):
-        state = jnp.zeros([self.proj_size])
-        if batch_size is not None:
-            state = add_batch(state, batch_size)
-        return state
