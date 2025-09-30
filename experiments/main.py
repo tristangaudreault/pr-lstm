@@ -1,11 +1,8 @@
 import logging
 import os
-import pickle
-import pprint
 import sys
-from contextlib import ExitStack
-from typing import Any
-
+from contextlib import contextmanager
+from typing import cast
 from dotenv import load_dotenv
 
 load_dotenv(override=True)
@@ -13,54 +10,49 @@ sys.path.append("external")
 
 import thesis
 
-import adapters  # Load all adapters
-from control import get_adapter_map, parse_args
+import cli
+import interface
 
 
-def vanilla_logger(
-    log_data: dict[str, Any], step: int | None = None, commit: bool | None = None
-):
-    if next(iter(log_data)).startswith("train/"):
-        return
-    elif "test/accuracy" in log_data:
-        print(f"{log_data["test/accuracy"]}", end="\n" if commit else ", ")
+class WandbHandler(logging.Handler):
+    def __init__(self, run, level: int | str = 0) -> None:
+        self.run = run
+        super().__init__(level)
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.run.log(record)
+        return super().emit(record)
+
+
+@contextmanager
+def init_logging(log_framework: str, args: dict):
+    logging.basicConfig()
+    log_level = getattr(logging, args["log_level"].upper(), logging.WARNING)
+    thesis.models.logger.setLevel(log_level)
+    for logger in interface.get_loggers():
+        logger.setLevel(log_level)
+
+    if log_framework == "wandb":
+        import wandb
+
+        with wandb.init(
+            entity=os.getenv("WANDB_ENTITY"),
+            project=os.getenv("WANDB_PROJECT"),
+            config=args,
+        ) as run:
+            for logger in interface.get_loggers():
+                logger.addHandler(WandbHandler(run))
+            yield cast(dict, run.config)
     else:
-        pprint.pprint(log_data)
+        yield args
 
 
 def main():
-    adapter_map = get_adapter_map()
-    args = vars(parse_args(adapter_map))
-    if args["output"]:
-        sys.stdout = open(args["output"], "w")
-        sys.stderr = sys.stdout
-    log_level = getattr(logging, args["log_level"].upper(), logging.INFO)
-    logging.basicConfig()
-    thesis.models.logger.setLevel(log_level)
+    # CLI
+    args = vars(cli.parse_args())
 
-    adapter = adapter_map[args["adapter"]]
-
-    with ExitStack() as stack:
-        config, logger = args, None
-        log = args.get("log")
-        if log == "wandb":
-            import wandb
-
-            run = stack.enter_context(
-                wandb.init(
-                    entity=os.getenv("WANDB_ENTITY"),
-                    project=os.getenv("WANDB_PROJECT"),
-                    config=args,
-                )  # type: ignore
-            )
-            config, logger = run.config, run.log
-        elif log == "vanilla":
-            logger = vanilla_logger
-
-        train_results, eval_results, params = adapter.run(**config, logger=logger)
-        if args["save_model"] is not None:
-            with open(args["save_model"], "wb") as f:
-                pickle.dump(params, f)
+    with init_logging(args["log_framework"], args) as config:
+        results, params, evaluation_results = interface.run_experiment(config)
 
 
 if __name__ == "__main__":

@@ -1,7 +1,4 @@
-import logging
 from typing import cast
-
-logger = logging.getLogger(__name__)
 
 import haiku as hk
 import jax
@@ -16,6 +13,10 @@ from thesis.utils import (
     scaled_dot_product_attention,
 )
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class Speculative(hk.Module):
     def __init__(
@@ -23,12 +24,14 @@ class Speculative(hk.Module):
         hidden_size: int,
         M: int,
         K: int,
+        temperature: float,
         name: str | None = None,
     ):
         super().__init__(name=name)
         self.hidden_size = hidden_size
         self.M = M
         self.K = K
+        self.temperature = temperature
 
     def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
         batch_size, seq_len, _ = x.shape
@@ -36,13 +39,6 @@ class Speculative(hk.Module):
 
         rnn = hk.VanillaRNN(
             hidden_size=self.hidden_size,
-        )
-
-        temperature = hk.get_state(
-            "temperature",
-            shape=(),
-            dtype=jnp.float32,
-            init=hk.initializers.Constant(2.0),
         )
 
         X_cal = get_X_cal(x, N, self.M, self.K)
@@ -53,7 +49,7 @@ class Speculative(hk.Module):
             X_cal,
             S_cal,
         )
-        ys = scan(H, temperature=temperature)
+        ys = scan(H, temperature=self.temperature)
 
         ys = transform_outputs(ys, seq_len)
 
@@ -103,7 +99,7 @@ def g(
 
 
 @cleartrace.traced
-def scan(H: tuple[jnp.ndarray, jnp.ndarray], temperature: jnp.ndarray):
+def scan(H: tuple[jnp.ndarray, jnp.ndarray], temperature: float):
     def compose(h_a: jnp.ndarray, h_b: jnp.ndarray):
         key_a, value_a = h_a
         query = value_a[:, :, :, -1, :]

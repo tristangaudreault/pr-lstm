@@ -21,11 +21,6 @@ def make_model(
         output = inner_core(**model_kwargs)(x)
         if not return_all_outputs:
             output = output[:, -1:, :]
-        hk.set_state(
-            "count",
-            hk.get_state("count", shape=[], dtype=jnp.int32, init=jnp.zeros) + 1,
-        )
-        # hk.set_state("output", output)
         output = jnn.relu(output)
         output = hk.Linear(output_size)(output)
         

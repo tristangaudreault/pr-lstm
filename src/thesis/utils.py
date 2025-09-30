@@ -38,7 +38,7 @@ def reshape_with_padding(x: jnp.ndarray, rows: int, cols: int) -> jnp.ndarray:
 
 
 def scaled_dot_product_attention(
-    query: jnp.ndarray, key: jnp.ndarray, value: jnp.ndarray, temperature: jnp.ndarray
+    query: jnp.ndarray, key: jnp.ndarray, value: jnp.ndarray, temperature: float
 ):
     d_k = query.shape[-1]
 

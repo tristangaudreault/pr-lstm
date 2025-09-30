@@ -1,44 +1,141 @@
 from argparse import ArgumentParser, Namespace
-from pathlib import Path
 
-from interface import Adapter
-
-
-def get_adapter_map() -> dict[str, type[Adapter]]:
-    return {
-        adapter.__name__.lower(): adapter
-        for adapter in Adapter.__subclasses__()
-    }
+from neural_networks_chomsky_hierarchy.experiments import constants
 
 
-def parse_args(adapter_map: dict[str, type[Adapter]]) -> Namespace:
+def parse_args() -> Namespace:
     parser = ArgumentParser()
-    subparsers = parser.add_subparsers(
-        dest="adapter",
-        help="learning adapter to use",
-    )
+
+    # Logging
     parser.add_argument(
         "--log-level",
         default="WARNING",
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         help="level of logging",
     )
-    parser.add_argument("-o", "--output", type=Path, help="output file path")
     parser.add_argument(
-        "--save-model", type=Path, help="save path for model parameters"
-    )
-    parser.add_argument("--load-model", type=Path, help="path to load model parameters")
-
-    # Reporting framework
-    parser.add_argument(
-        "--log",
-        default="none",
-        choices=["vanilla", "none", "wandb"],
+        "--log-framework",
+        default="default",
+        choices=["default", "wandb"],
         help="logging framework to use",
     )
+    parser.add_argument(
+        "--log-frequency",
+        type=int,
+        default=1_000,
+        help="number iterations between log entries",
+    )
 
-    for name, adapter in adapter_map.items():
-        subparser = subparsers.add_parser(name)
-        adapter.add_arguments(subparser)
+    # Experiment
+    parser.add_argument(
+        "--task-name",
+        type=str,
+        choices=constants.TASK_BUILDERS.keys(),
+        default="even_pairs",
+        help="length generalization task",
+    )
+    parser.add_argument(
+        "--training-steps",
+        type=int,
+        default=1_000_000,
+        help="number of training steps",
+    )
+    parser.add_argument(
+        "-b",
+        "--batch-size",
+        type=int,
+        default=128,
+        help="number of samples in each training batch",
+    )
+    parser.add_argument(
+        "-lr", "--learning-rate", type=float, default=1e-3, help="learning rate"
+    )
+    parser.add_argument(
+        "--min-training-range",
+        type=int,
+        default=1,
+        help="minimum length of training sequences",
+    )
+    parser.add_argument(
+        "--training-range",
+        "--max-training-range",
+        type=int,
+        default=40,
+        help="maximum training sequence length (inclusive)",
+    )
+    parser.add_argument(
+        "--testing-range",
+        type=int,
+        default=500,
+        help="maximum length of testing sequences",
+    )
+    parser.add_argument(
+        "--autoregressive",
+        action="store_true",
+        help="use autoregressive sampling",
+    )
+    parser.add_argument(
+        "--computation-steps-mult",
+        type=int,
+        default=0,
+        help=("number of computation tokens to append (as multiple of input length)"),
+    )
+
+    # Model
+    parser.add_argument(
+        "--model-name",
+        type=str,
+        choices=constants.MODEL_BUILDERS.keys(),
+        default="tape_rnn",
+        help="model architecture",
+    )
+    parser.add_argument(
+        "--hidden-size",
+        type=int,
+        default=256,
+    )
+    parser.add_argument(
+        "--memory-cell-size",
+        type=int,
+        default=8,
+        help="dimension of vectors put in memory",
+    )
+    parser.add_argument(
+        "--memory-size",
+        type=int,
+        default=256,
+        help="size of tape (fixed along the episode)",
+    )
+    parser.add_argument(
+        "--stack-cell-size",
+        type=int,
+        default=8,
+        help="dimension of vectors put in the stack",
+    )
+    parser.add_argument(
+        "--stack-size",
+        type=int,
+        default=128,
+        help="total number of vectors that can be stacked",
+    )
+    parser.add_argument(
+        "--outer-hidden-size",
+        type=int,
+        default=128,
+    )
+    parser.add_argument("--num-heads", type=int, help="number of attention heads")
+
+    # Speculative
+    parser.add_argument(
+        "-M", type=int, default=2, help="time steps between initial speculations"
+    )
+    parser.add_argument("-K", type=int, default=None, help="number of speculations")
+    parser.add_argument(
+        "-T",
+        "--temperature",
+        type=float,
+        default=1.0,
+        help="speculative model temperature",
+    )
 
     return parser.parse_args()
