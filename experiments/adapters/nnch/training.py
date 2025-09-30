@@ -72,7 +72,7 @@ def create_traning_params(
         model = utils.make_model_with_empty_targets(
             model, task, computation_steps_mult, single_output
         )
-    model = hk.transform_with_state(model)
+    model = hk.transform(model)
 
     # Create the loss and accuracy based on the pointwise ones.
     def loss_fn(output, target):
@@ -107,6 +107,6 @@ def create_traning_params(
 
 def train(training_params, **kwargs):
     training_worker = training.TrainingWorker(training_params, use_tqdm=False)
-    results, _, params, state = training_worker.run()
+    results, _, params = training_worker.run()
 
-    return results, params, state
+    return results, params
