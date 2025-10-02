@@ -1,14 +1,12 @@
-import logging
 import os
 import sys
-from contextlib import contextmanager
+from contextlib import ExitStack, AbstractContextManager
 from typing import cast
 from dotenv import load_dotenv
+import logging
 
 load_dotenv(override=True)
 sys.path.append("external")
-
-import thesis
 
 import cli
 import interface
@@ -24,34 +22,41 @@ class WandbHandler(logging.Handler):
         return super().emit(record)
 
 
-@contextmanager
-def init_logging(log_framework: str, args: dict):
-    logging.basicConfig()
+def init_logging(log_handlers: list[str], args: dict, stack: ExitStack) -> dict:
+    handler = logging.StreamHandler()
+    handler.addFilter(lambda record: record.name != "training")
+    logging.basicConfig(handlers=[handler], force=True)
+    
     log_level = getattr(logging, args["log_level"].upper(), logging.WARNING)
-    thesis.models.logger.setLevel(log_level)
-    for logger in interface.get_loggers():
-        logger.setLevel(log_level)
+    for current_logger in interface.get_loggers():
+        current_logger.setLevel(log_level)
 
-    if log_framework == "wandb":
+    if "wandb" in log_handlers:
         import wandb
 
-        with wandb.init(
-            entity=os.getenv("WANDB_ENTITY"),
-            project=os.getenv("WANDB_PROJECT"),
-            config=args,
-        ) as run:
-            for logger in interface.get_loggers():
-                logger.addHandler(WandbHandler(run))
-            yield cast(dict, run.config)
+        run = stack.enter_context(
+            cast(
+                AbstractContextManager,
+                wandb.init(
+                    entity=os.getenv("WANDB_ENTITY"),
+                    project=os.getenv("WANDB_PROJECT"),
+                    config=args,
+                ),
+            )
+        )
+        for current_logger in interface.get_loggers():
+            current_logger.addHandler(WandbHandler(run))
+        return cast(dict, run.config)
     else:
-        yield args
+        return args
 
 
 def main():
     # CLI
     args = vars(cli.parse_args())
 
-    with init_logging(args["log_framework"], args) as config:
+    with ExitStack() as stack:
+        config = init_logging(args["log_handlers"], args, stack)
         results, params, evaluation_results = interface.run_experiment(config)
 
 

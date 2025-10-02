@@ -5,15 +5,12 @@ import jax
 import jax.numpy as jnp
 import jax.nn as jnn
 from einops import rearrange
-
-import cleartrace
+import logging
 
 from thesis.utils import (
     reshape_with_padding,
     scaled_dot_product_attention,
 )
-
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +53,6 @@ class Speculative(hk.Module):
         return ys
 
 
-@cleartrace.traced
 def get_X_cal(x: jnp.ndarray, N: int, M: int, K: int) -> jnp.ndarray:
     batch_size, _, embed_dim = x.shape
 
@@ -82,7 +78,6 @@ def get_S_cal(batch_size: int, N: int, K: int, hidden_size: int):
     return S_cal
 
 
-@cleartrace.traced
 def g(
     rnn: hk.RNNCore,
     X_cal: jnp.ndarray,
@@ -98,7 +93,6 @@ def g(
     return (S_cal, transposed_outputs)
 
 
-@cleartrace.traced
 def scan(H: tuple[jnp.ndarray, jnp.ndarray], temperature: float):
     def compose(h_a: jnp.ndarray, h_b: jnp.ndarray):
         key_a, value_a = h_a
@@ -119,7 +113,6 @@ def scan(H: tuple[jnp.ndarray, jnp.ndarray], temperature: float):
     return ys
 
 
-@cleartrace.traced
 def transform_outputs(ys: jnp.ndarray, seq_len: int):
     ys = rearrange(ys, "b r c h -> b (r c) h")
     ys = ys[:, :seq_len, :]

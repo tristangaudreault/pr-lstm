@@ -9,20 +9,21 @@ def parse_args() -> Namespace:
     # Logging
     parser.add_argument(
         "--log-level",
-        default="WARNING",
+        default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         help="level of logging",
     )
     parser.add_argument(
-        "--log-framework",
-        default="default",
-        choices=["default", "wandb"],
-        help="logging framework to use",
+        "--log-handlers",
+        nargs="*",
+        default=[],
+        choices=["wandb"],
+        help="logging handlers to use",
     )
     parser.add_argument(
         "--log-frequency",
         type=int,
-        default=1_000,
+        default=50_000,
         help="number iterations between log entries",
     )
 

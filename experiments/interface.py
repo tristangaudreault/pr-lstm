@@ -1,8 +1,12 @@
 import inspect
 from functools import partial
 from typing import cast
+import time
+import logging
+from contextlib import contextmanager
 
 import haiku as hk
+import jax
 import jax.numpy as jnp
 
 from neural_networks_chomsky_hierarchy.models.rnn import make_rnn
@@ -16,10 +20,13 @@ from neural_networks_chomsky_hierarchy.experiments import (
 from neural_networks_chomsky_hierarchy.tasks.task import GeneralizationTask
 
 import models
+import thesis
+
+logger = logging.getLogger(__name__)
 
 
-def get_loggers():
-    return training.logger, range_evaluation.logger
+def get_loggers() -> list:
+    return [logger, thesis.models.logger, training.logger, range_evaluation.logger]
 
 
 def filter_kwargs(model_builder, kwargs) -> dict:
@@ -110,13 +117,6 @@ def make_training_params(
     return training_params
 
 
-def train(training_params, **kwargs):
-    training_worker = training.TrainingWorker(training_params, use_tqdm=False)
-    results, _, params = training_worker.run()
-
-    return results, params
-
-
 def make_evaluation_params(training_params, params):
     evaluation_params = range_evaluation.EvaluationParams(
         model=training_params.model,
@@ -131,17 +131,21 @@ def make_evaluation_params(training_params, params):
     return evaluation_params
 
 
-def evaluate(evaluation_params):
-    evaluation_results = range_evaluation.range_evaluation(
-        evaluation_params, use_tqdm=False
-    )
-    return evaluation_results
+@contextmanager
+def log_time(key: str):
+    start_time = time.time()
+    yield
+    end_time = time.time()
+    logger.info({key: end_time - start_time})
 
 
 def run_experiment(config: dict):
     training_params = make_training_params(**config)
-    training_worker = training.TrainingWorker(training_params, use_tqdm=False)
-    results, _, params = training_worker.run()
+
+    training_worker = training.TrainingWorker(training_params, use_tqdm=True)
+
+    with log_time("train/total_time"):
+        results, _, params = training_worker.run()
 
     if config["model_name"] == "speculative":
         intermediate_config = config.copy()
@@ -151,6 +155,15 @@ def run_experiment(config: dict):
         intermediate_params = training_params
 
     evaluation_params = make_evaluation_params(intermediate_params, params)
-    evaluation_results = evaluate(evaluation_params)
+    with jax.disable_jit():
+        evaluation_results = range_evaluation.range_evaluation(
+            evaluation_params, use_tqdm=False
+        )
+
+    accuracies = jnp.array(
+        [log_data["test/accuracy"] for log_data in evaluation_results]
+    )
+    score = jnp.mean(accuracies[config["training_range"] :])
+    logger.info({"test/network_score": score})
 
     return results, params, evaluation_results
