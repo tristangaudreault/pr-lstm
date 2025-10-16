@@ -142,14 +142,15 @@ def log_time(key: str):
 def run_experiment(config: dict):
     training_params = make_training_params(**config)
 
-    training_worker = training.TrainingWorker(training_params, use_tqdm=True)
+    training_worker = training.TrainingWorker(
+        training_params, use_tqdm="tqdm" in config["log_handlers"]
+    )
 
     with log_time("train/total_time"):
         results, _, params = training_worker.run()
 
     if config["model_name"] == "speculative":
         intermediate_config = config.copy()
-        intermediate_config["temperature"] = 1e-6
         intermediate_params = make_training_params(**intermediate_config)
     else:
         intermediate_params = training_params

@@ -24,13 +24,14 @@ class WandbHandler(logging.Handler):
 
 def init_logging(log_handlers: list[str], args: dict, stack: ExitStack) -> dict:
     handler = logging.StreamHandler()
-    handler.addFilter(lambda record: record.name != "training")
     logging.basicConfig(handlers=[handler], force=True)
     
     log_level = getattr(logging, args["log_level"].upper(), logging.WARNING)
     for current_logger in interface.get_loggers():
         current_logger.setLevel(log_level)
 
+    if "logging" not in log_handlers:
+        handler.addFilter(lambda record: record.name != "training")
     if "wandb" in log_handlers:
         import wandb
 

@@ -1,4 +1,5 @@
 from argparse import ArgumentParser, Namespace
+from pathlib import Path
 
 from neural_networks_chomsky_hierarchy.experiments import constants
 
@@ -16,8 +17,8 @@ def parse_args() -> Namespace:
     parser.add_argument(
         "--log-handlers",
         nargs="*",
-        default=[],
-        choices=["wandb"],
+        default=["tqdm"],
+        choices=["tqdm", "logging", "wandb"],
         help="logging handlers to use",
     )
     parser.add_argument(
@@ -131,12 +132,5 @@ def parse_args() -> Namespace:
         "-M", type=int, default=2, help="time steps between initial speculations"
     )
     parser.add_argument("-K", type=int, default=None, help="number of speculations")
-    parser.add_argument(
-        "-T",
-        "--temperature",
-        type=float,
-        default=1.0,
-        help="speculative model temperature",
-    )
 
     return parser.parse_args()

@@ -12,6 +12,12 @@ dependencies = [
   "dotenv",
   "wandb",
   "einops",
+  "absl-py",
+  "dm-tree",
+  "einshape @ git+https://github.com/deepmind/einshape",
+  "optax",
+  "tqdm",
+  "typing-extensions",
 ]
 authors = [
   { name = "Tristan Gaudreault", email = "tristan@tristangaudreault.com" },
