@@ -10,6 +10,7 @@ def parse_args() -> Namespace:
     # Logging
     parser.add_argument(
         "--log-level",
+        type=str.upper,
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         help="level of logging",
