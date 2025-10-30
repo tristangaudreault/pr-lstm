@@ -149,22 +149,20 @@ def run_experiment(config: dict):
     with log_time("train/total_time"):
         results, _, params = training_worker.run()
 
-    if config["model_name"] == "speculative":
-        intermediate_config = config.copy()
-        intermediate_params = make_training_params(**intermediate_config)
-    else:
-        intermediate_params = training_params
-
-    evaluation_params = make_evaluation_params(intermediate_params, params)
+    evaluation_params = make_evaluation_params(training_params, params)
     with jax.disable_jit():
         evaluation_results = range_evaluation.range_evaluation(
             evaluation_params, use_tqdm=False
         )
 
     accuracies = jnp.array(
-        [log_data["test/accuracy"] for log_data in evaluation_results]
+        [
+            log_data["test/accuracy"]
+            for log_data in evaluation_results
+            if log_data["test/length"] > config["training_range"]
+        ]
     )
-    score = jnp.mean(accuracies[config["training_range"] :])
+    score = jnp.mean(accuracies)
     logger.info({"test/network_score": score})
 
     return results, params, evaluation_results

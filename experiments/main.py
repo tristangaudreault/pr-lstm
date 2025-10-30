@@ -18,14 +18,13 @@ class WandbHandler(logging.Handler):
         super().__init__(level)
 
     def emit(self, record: logging.LogRecord) -> None:
-        self.run.log(record)
-        return super().emit(record)
+        self.run.log(record.msg)
 
 
 def init_logging(log_handlers: list[str], args: dict, stack: ExitStack) -> dict:
     handler = logging.StreamHandler()
     logging.basicConfig(handlers=[handler], force=True)
-    
+
     log_level = getattr(logging, args["log_level"].upper(), logging.WARNING)
     for current_logger in interface.get_loggers():
         current_logger.setLevel(log_level)
