@@ -121,17 +121,8 @@ def parse_args() -> Namespace:
         default=128,
         help="total number of vectors that can be stacked",
     )
-    parser.add_argument(
-        "--outer-hidden-size",
-        type=int,
-        default=128,
-    )
-    parser.add_argument("--num-heads", type=int, help="number of attention heads")
 
     # Speculative
-    parser.add_argument(
-        "-M", type=int, default=2, help="time steps between initial speculations"
-    )
-    parser.add_argument("-K", type=int, default=None, help="number of speculations")
+    parser.add_argument("--K", "-K", type=int, default=None, help="number of speculations")
 
     return parser.parse_args()
