@@ -21,10 +21,10 @@ def make_model(
         output = inner_core(**model_kwargs)(x)
         if not return_all_outputs:
             output = output[:, -1:, :]
-        
-        output = hk.Linear(output_size)(output)
+
         output = jnn.relu(output)
-        
+        output = hk.Linear(output_size)(output)
+
         return output
 
     return model

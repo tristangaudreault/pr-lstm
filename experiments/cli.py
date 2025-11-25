@@ -18,7 +18,7 @@ def parse_args() -> Namespace:
     parser.add_argument(
         "--log-handlers",
         nargs="*",
-        default=["tqdm"],
+        default=["logging"],
         choices=["tqdm", "logging", "wandb"],
         help="logging handlers to use",
     )
@@ -60,6 +60,7 @@ def parse_args() -> Namespace:
         help="minimum length of training sequences",
     )
     parser.add_argument(
+        "-N",
         "--training-range",
         "--max-training-range",
         type=int,
@@ -89,7 +90,7 @@ def parse_args() -> Namespace:
         "--model-name",
         type=str,
         choices=constants.MODEL_BUILDERS.keys(),
-        default="tape_rnn",
+        default="speculative",
         help="model architecture",
     )
     parser.add_argument(
@@ -123,6 +124,14 @@ def parse_args() -> Namespace:
     )
 
     # Speculative
-    parser.add_argument("--K", "-K", type=int, default=None, help="number of speculations")
+    parser.add_argument(
+        "--J", "-J", type=int, help="number of intependant speculative units"
+    )
+    parser.add_argument(
+        "--K", "-K", type=int, default=None, help="number of speculations per unit"
+    )
+    parser.add_argument(
+        "--L", "--layers", "-L", type=int, default=1, help="stacked RNN layers"
+    )
 
     return parser.parse_args()

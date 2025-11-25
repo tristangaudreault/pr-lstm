@@ -1,85 +1,91 @@
 import haiku as hk
 import jax
-from jax.core import Tracer
+from jax import Array
 import jax.numpy as jnp
-import jax.nn as jnn
 import logging
-import matplotlib.pyplot as plt
+
+from .helpers import create_ensemble, make_rnn, unroll
 
 logger = logging.getLogger(__name__)
 
 
-def sigma_z(x, alpha=1.0):
-    activated = jnn.relu(jnp.abs(x) - alpha)
-    # normalized = activated / (jnp.sum(activated, axis=-1, keepdims=True) + 1e-6)
-    signed = activated * jnp.sign(x)
+def get_specs(shape: tuple[int, ...], learnable: bool) -> Array:
+    """Creates speculation tensor
 
-    return signed
+    Parameters
+    ----------
+    shape : tuple[int, ...]
+        Shape of the required speculation tensor.
+    learnable : bool
+        If set to ``True`` the speculations will be registered as parameters, and will therefore be learned.
+        Otherwise they will be randomly chosen during every call.
 
-
-def get_S(hidden_size, K) -> jax.Array:
-    key = jax.random.PRNGKey(0)
-    A = jax.random.normal(key, (hidden_size, K))
-    Q, R = jnp.linalg.qr(A)
-    Q *= jnp.sign(jnp.diag(R))
-    S = Q[jnp.newaxis, jnp.newaxis, :, :]
-    return S
-
-
-def pow_signed(x, p):
-    return jnp.sign(x) * (jnp.abs(x) ** p)
+    Returns
+    -------
+    array_like
+        Speculation tensor of shape ``shape``, with values sampled from the uniform distribution between ``-1`` and ``1``.
+    """
+    init = hk.initializers.RandomUniform(minval=-1)
+    if learnable:
+        return hk.get_parameter(
+            "S",
+            shape=shape,
+            init=init,
+        )
+    else:
+        return init(shape, jnp.float32)
 
 
 class Speculative(hk.Module):
+    """Speculative model.
+
+    Attributes
+    ----------
+    hidden_size : int
+        Hidden size of the inner RNN cells.
+    J : int
+        Size of the ensemble of RNN cells.
+    K : int
+        Number of speculations to perform.
+    learnable_specs : bool
+        If set to ``True`` the speculations will be registered as parameters, and will therefore be learned.
+        Otherwise they will be randomly chosen during every call.
+    """
+
     def __init__(
         self,
         hidden_size: int,
+        J: int,
         K: int,
+        learnable_specs: bool = True,
         name: str | None = None,
     ):
         super().__init__(name=name)
         self.hidden_size = hidden_size
+        self.J = J
         self.K = K
+        self.learnable_specs = learnable_specs
 
-    def __call__(self, x: jax.Array) -> tuple[jax.Array, jax.Array]:
-        input_size = x.shape[-1]
-        S = get_S(self.hidden_size, self.K)
-        W_h = hk.get_parameter(
-            "W_h",
-            (self.hidden_size, self.hidden_size),
-            init=hk.initializers.Orthogonal(),
-        )
-        W_x = hk.get_parameter(
-            "W_x",
-            (self.hidden_size, input_size),
-            init=hk.initializers.TruncatedNormal(stddev=1.0 / jnp.sqrt(input_size)),
-        )
-        b_h = hk.get_parameter("b_h", (self.hidden_size, 1), init=jnp.zeros)
+    def __call__(self, xs: jax.Array) -> jax.Array:
+        """Applies the speculative model.
 
-        x = x[:, :, :, jnp.newaxis]
-        logits = jnn.relu(W_h @ S + W_x @ x + b_h)
-        Z = S.transpose(0, 1, 3, 2) @ logits
-        output = jax.lax.associative_scan(
-            compose,
-            Z,
-            axis=1,
-        )
-        output = output[:, :, :, 0]
+        Parameters
+        ----------
+        xs : array_like
+            Input sequence tensor of shape ``(B, T, I)``.
 
-        if not isinstance(Z, Tracer):
-            print("Z:", jnp.mean(Z, axis=(0, 1, 2)))
-            print("output:", jnp.max(output, (0, 1)))
+        Returns
+        -------
+        array_like
+            Output sequence tensor of shape (B, T, H * J).
+        """
+        batch_size, seq_size, _ = xs.shape
 
-        if x.shape[0] > 128:
-            jax.debug.print(
-                "Z: {}\noutput assigments: {}",
-                Z[0, -1, :, 0],
-                output[0, -1, :],
-            )
-        return output
+        rnn_vmap = create_ensemble(make_rnn(self.hidden_size), self.J)
+        xs = xs[:, None, ...]
+        specs = get_specs((self.J, self.K, 1, self.hidden_size), self.learnable_specs)
 
+        hs = unroll(rnn_vmap, xs, specs, time_major=False)
+        hs = hs.reshape(batch_size, seq_size, -1)
 
-def compose(a, b):
-    mult = b @ a
-    mult = 4 * (mult ** 3)
-    return mult / jnp.linalg.norm(mult, axis=-2, keepdims=True)
+        return hs
