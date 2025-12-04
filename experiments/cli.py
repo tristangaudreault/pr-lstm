@@ -131,7 +131,11 @@ def parse_args() -> Namespace:
         "--K", "-K", type=int, default=None, help="number of speculations per unit"
     )
     parser.add_argument(
-        "--L", "--layers", "-L", type=int, default=1, help="stacked RNN layers"
+        "--temperature",
+        "--tau",
+        type=float,
+        default=1.0,
+        help="speculation selection temperature",
     )
 
     return parser.parse_args()

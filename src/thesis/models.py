@@ -1,39 +1,14 @@
-import haiku as hk
 import jax
-from jax import Array
 import jax.numpy as jnp
+import jax.nn as jnn
+import haiku as hk
 import logging
 
-from .helpers import create_ensemble, make_rnn, unroll
+from .rnn import create_ensemble, make_rnn
+from .speculation import sobol
+from .regressions import pairwise_euclidean, gumbel_softmax, hardmax
 
 logger = logging.getLogger(__name__)
-
-
-def get_specs(shape: tuple[int, ...], learnable: bool) -> Array:
-    """Creates speculation tensor
-
-    Parameters
-    ----------
-    shape : tuple[int, ...]
-        Shape of the required speculation tensor.
-    learnable : bool
-        If set to ``True`` the speculations will be registered as parameters, and will therefore be learned.
-        Otherwise they will be randomly chosen during every call.
-
-    Returns
-    -------
-    array_like
-        Speculation tensor of shape ``shape``, with values sampled from the uniform distribution between ``-1`` and ``1``.
-    """
-    init = hk.initializers.RandomUniform(minval=-1)
-    if learnable:
-        return hk.get_parameter(
-            "S",
-            shape=shape,
-            init=init,
-        )
-    else:
-        return init(shape, jnp.float32)
 
 
 class Speculative(hk.Module):
@@ -47,7 +22,7 @@ class Speculative(hk.Module):
         Size of the ensemble of RNN cells.
     K : int
         Number of speculations to perform.
-    learnable_specs : bool
+    learnable_spec_points : bool
         If set to ``True`` the speculations will be registered as parameters, and will therefore be learned.
         Otherwise they will be randomly chosen during every call.
     """
@@ -57,6 +32,7 @@ class Speculative(hk.Module):
         hidden_size: int,
         J: int,
         K: int,
+        temperature: float,
         learnable_specs: bool = True,
         name: str | None = None,
     ):
@@ -64,6 +40,7 @@ class Speculative(hk.Module):
         self.hidden_size = hidden_size
         self.J = J
         self.K = K
+        self.temperature = temperature
         self.learnable_specs = learnable_specs
 
     def __call__(self, xs: jax.Array) -> jax.Array:
@@ -77,15 +54,35 @@ class Speculative(hk.Module):
         Returns
         -------
         array_like
-            Output sequence tensor of shape (B, T, H * J).
+            Output sequence tensor of shape (B, T, J * H).
         """
         batch_size, seq_size, _ = xs.shape
 
-        rnn_vmap = create_ensemble(make_rnn(self.hidden_size), self.J)
-        xs = xs[:, None, ...]
-        specs = get_specs((self.J, self.K, 1, self.hidden_size), self.learnable_specs)
+        rnn_ensemble = create_ensemble(make_rnn(self.hidden_size), self.J)
+        speculations = hk.get_parameter(
+            "S", (1, 1, self.J, self.K, self.hidden_size), init=sobol
+        )
+        xs = xs[:, :, None, :]
+        _, responses = rnn_ensemble(speculations, xs)
 
-        hs = unroll(rnn_vmap, xs, specs, time_major=False)
+        def predictor(test_points, response_points):
+            similarity_matrix = -pairwise_euclidean(test_points, speculations)
+            weights = (
+                gumbel_softmax(
+                    similarity_matrix / self.temperature,
+                    tau=1.0 / self.temperature,
+                    hard=False,
+                )
+                if self.temperature > 0.0
+                else hardmax(similarity_matrix)
+            )
+            return weights @ response_points
+
+        hs = jax.lax.associative_scan(predictor, responses, axis=1)
+
+        hs = hs.take(0, -2)
         hs = hs.reshape(batch_size, seq_size, -1)
+        size = self.J * self.hidden_size
+        hs = hk.Linear(size, name="combine")(hs)
 
         return hs

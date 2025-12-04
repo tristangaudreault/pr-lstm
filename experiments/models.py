@@ -23,7 +23,7 @@ def make_model(
             output = output[:, -1:, :]
 
         output = jnn.relu(output)
-        output = hk.Linear(output_size)(output)
+        output = hk.Linear(output_size, name="output")(output)
 
         return output
 
