@@ -5,11 +5,15 @@ from typing import cast
 from dotenv import load_dotenv
 import logging
 
+import jax.numpy as jnp
+
 load_dotenv(override=True)
 sys.path.append("external")
 
 import cli
 import interface
+
+jnp.set_printoptions(floatmode="fixed")
 
 
 class WandbHandler(logging.Handler):
@@ -22,15 +26,9 @@ class WandbHandler(logging.Handler):
 
 
 def init_logging(log_handlers: list[str], args: dict, stack: ExitStack) -> dict:
-    handler = logging.StreamHandler()
-    logging.basicConfig(handlers=[handler], force=True)
-
+    logging.basicConfig(level=logging.WARNING)
     log_level = getattr(logging, args["log_level"].upper(), logging.WARNING)
-    for current_logger in interface.get_loggers():
-        current_logger.setLevel(log_level)
-
-    if "logging" not in log_handlers:
-        handler.addFilter(lambda record: record.name != "training")
+    logging.getLogger("thesis").setLevel(log_level)
     if "wandb" in log_handlers:
         import wandb
 
@@ -44,8 +42,7 @@ def init_logging(log_handlers: list[str], args: dict, stack: ExitStack) -> dict:
                 ),
             )
         )
-        for current_logger in interface.get_loggers():
-            current_logger.addHandler(WandbHandler(run))
+        logging.getLogger("thesis").addHandler(WandbHandler(run))
         return cast(dict, run.config)
     else:
         return args

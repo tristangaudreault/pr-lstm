@@ -20,13 +20,8 @@ from neural_networks_chomsky_hierarchy.experiments import (
 from neural_networks_chomsky_hierarchy.tasks.task import GeneralizationTask
 
 import models
-import thesis
 
-logger = logging.getLogger(__name__)
-
-
-def get_loggers() -> list:
-    return [logger, thesis.models.logger, training.logger, range_evaluation.logger]
+logger = logging.getLogger("thesis." + __name__)
 
 
 def filter_kwargs(model_builder, kwargs) -> dict:
@@ -149,7 +144,11 @@ def run_experiment(config: dict):
     with log_time("train/total_time"):
         results, _, params = training_worker.run()
 
-    evaluation_params = make_evaluation_params(training_params, params)
+    eval_config = config.copy()
+    # eval_config["temperature"] = 0.0
+    intermediate_params = make_training_params(**eval_config)
+
+    evaluation_params = make_evaluation_params(intermediate_params, params)
     with jax.disable_jit():
         evaluation_results = range_evaluation.range_evaluation(
             evaluation_params, use_tqdm=False
