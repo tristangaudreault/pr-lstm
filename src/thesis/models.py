@@ -1,14 +1,35 @@
+from functools import partial, wraps
+from itertools import accumulate
+from typing import Any, Callable, Protocol
+from operator import sub
+
 import jax
+from jax import Array
 import jax.numpy as jnp
 import jax.nn as jnn
 import haiku as hk
 import logging
 
-from .rnn import create_ensemble, make_rnn
-from .speculation import sobol
-from .regressions import pairwise_euclidean, gumbel_softmax, hardmax
+from .helpers import RNNCell
+from .utils import concat_tree, get_split_array, print_grad
+
 
 logger = logging.getLogger(__name__)
+
+
+def normalize(arr, a, b, axis: int):
+    # Calculate min/max along the last axis (axis=-1)
+    # keepdims=True ensures the result is (shape..., 1) instead of (shape...)
+    arr_min = jnp.min(arr, axis=axis, keepdims=True)
+    arr_max = jnp.max(arr, axis=axis, keepdims=True)
+
+    # Standard formula, now applied per-vector
+    denom = arr_max - arr_min
+
+    # Optional: Handle cases where all elements in a row are the same
+    # denom[denom == 0] = 1.0
+
+    return a + (arr - arr_min) * (b - a) / denom
 
 
 class Speculative(hk.Module):
@@ -18,30 +39,19 @@ class Speculative(hk.Module):
     ----------
     hidden_size : int
         Hidden size of the inner RNN cells.
-    J : int
-        Size of the ensemble of RNN cells.
     K : int
         Number of speculations to perform.
-    learnable_spec_points : bool
-        If set to ``True`` the speculations will be registered as parameters, and will therefore be learned.
-        Otherwise they will be randomly chosen during every call.
     """
 
     def __init__(
         self,
         hidden_size: int,
-        J: int,
         K: int,
-        temperature: float,
-        learnable_specs: bool = True,
         name: str | None = None,
     ):
         super().__init__(name=name)
         self.hidden_size = hidden_size
-        self.J = J
         self.K = K
-        self.temperature = temperature
-        self.learnable_specs = learnable_specs
 
     def __call__(self, xs: jax.Array) -> jax.Array:
         """Applies the speculative model.
@@ -54,35 +64,70 @@ class Speculative(hk.Module):
         Returns
         -------
         array_like
-            Output sequence tensor of shape (B, T, J * H).
+            Output sequence tensor of shape (B, T, H).
         """
-        batch_size, seq_size, _ = xs.shape
+        batch_size = xs.shape[0]
 
-        rnn_ensemble = create_ensemble(make_rnn(self.hidden_size), self.J)
-        speculations = hk.get_parameter(
-            "S", (1, 1, self.J, self.K, self.hidden_size), init=sobol
+        h0, F, out_filter = self.get_cell(batch_size)
+        S, Q = self.get_quantizer()
+
+        _, phi_step = self.restrict_to_S(F, xs, jax.lax.stop_gradient(S))
+
+        # Implementation detail: Q is injected in the composition function
+        def compose(a, b):
+            quantization = Q(a, is_training=True)
+            indices = quantization["encoding_indices"][..., None]
+            composed = jnp.take_along_axis(b, indices, axis=-2)
+
+            return (
+                a + composed
+            )  # + quantization["loss"] - jax.lax.stop_gradient(quantization["loss"])
+
+        hs = self.scan_phi_step(compose, phi_step, h0)
+
+        return out_filter(hs)
+
+    def get_cell(self, batch_size: int) -> tuple[Any, Callable, Callable]:
+        F = hk.LSTM(self.hidden_size)
+        h0 = F.initial_state(batch_size)
+
+        # Implementation detail: tree utilities
+        self.split_array, self.total_size = get_split_array(h0)
+
+        return h0, F, lambda h: h.hidden
+
+    def get_quantizer(self) -> tuple[Any, Callable]:
+        Q: hk.nets.VectorQuantizer = hk.nets.VectorQuantizer(
+            self.total_size, self.K, 0.25
         )
-        xs = xs[:, :, None, :]
-        _, responses = rnn_ensemble(speculations, xs)
+        S = Q.embeddings.T
+        S = self.split_array(S)
 
-        def predictor(test_points, response_points):
-            similarity_matrix = -pairwise_euclidean(test_points, speculations)
-            weights = (
-                gumbel_softmax(
-                    similarity_matrix / self.temperature,
-                    tau=1.0 / self.temperature,
-                    hard=False,
-                )
-                if self.temperature > 0.0
-                else hardmax(similarity_matrix)
-            )
-            return weights @ response_points
+        return S, Q
 
-        hs = jax.lax.associative_scan(predictor, responses, axis=1)
+    def restrict_to_S(self, F: Callable, xs: Array, S: Any) -> Any:
+        F = jax.vmap(F, in_axes=(None, 0))
+        F = jax.vmap(F, in_axes=(0, None))
+        F = jax.vmap(F, in_axes=(0, None))
 
-        hs = hs.take(0, -2)
-        hs = hs.reshape(batch_size, seq_size, -1)
-        size = self.J * self.hidden_size
-        hs = hk.Linear(size, name="combine")(hs)
+        return F(xs, S)
+
+    def scan_phi_step(self, compose: Callable, phi_step: Array, h0: Array) -> Array:
+        # Implementation detail: the quantizer expects concatenated trees
+        phi_step = concat_tree(phi_step)
+        h0 = concat_tree(h0)
+
+        phi_one = jax.lax.associative_scan(
+            compose,
+            phi_step,
+            axis=1,
+        )
+
+        # Implementation detail: the trailing Q is applied here
+        compose = jax.vmap(compose, in_axes=(None, 1), out_axes=1)
+        hs = compose(h0[:, None, :], phi_one)[..., 0, :]
+
+        # Implementation detail: reconstructing trees
+        hs = self.split_array(hs)
 
         return hs
