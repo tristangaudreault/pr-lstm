@@ -40,6 +40,12 @@ def get_split_array(
     return split_array, total_size
 
 
+def recursive_vmap(fn: Callable, in_axes_seq: Sequence):
+    for in_axes in in_axes_seq:
+        fn = jax.vmap(fn, in_axes)
+    return fn
+
+
 @jax.custom_vjp
 def print_grad(x):
     return x

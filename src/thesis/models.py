@@ -1,7 +1,6 @@
-from functools import partial, wraps
-from itertools import accumulate
-from typing import Any, Callable, Protocol
-from operator import sub
+from typing import Any, Callable
+import math
+import os
 
 import jax
 from jax import Array
@@ -10,8 +9,7 @@ import jax.nn as jnn
 import haiku as hk
 import logging
 
-from .helpers import RNNCell
-from .utils import concat_tree, get_split_array, print_grad
+from .utils import concat_tree, get_split_array, print_grad, recursive_vmap
 
 
 logger = logging.getLogger(__name__)
@@ -45,13 +43,13 @@ class Speculative(hk.Module):
 
     def __init__(
         self,
-        hidden_size: int,
         K: int,
+        hidden_size: int,
         name: str | None = None,
     ):
         super().__init__(name=name)
-        self.hidden_size = hidden_size
         self.K = K
+        self.hidden_size = hidden_size
 
     def __call__(self, xs: jax.Array) -> jax.Array:
         """Applies the speculative model.
@@ -66,68 +64,96 @@ class Speculative(hk.Module):
         array_like
             Output sequence tensor of shape (B, T, H).
         """
-        batch_size = xs.shape[0]
+        batch_size, seq_len, embed_dim = xs.shape
+        split_idx = self.get_split_idx(seq_len)
+        if hk.running_init():
+            logger.debug("%d / %d (unrolled / scanned)", split_idx, seq_len - split_idx)
 
-        h0, F, out_filter = self.get_cell(batch_size)
-        S, Q = self.get_quantizer()
+        h0, F = self.get_core(batch_size)
 
-        _, phi_step = self.restrict_to_S(F, xs, jax.lax.stop_gradient(S))
+        _, unrolled = self.unroll(F, xs[:, :split_idx, :], h0)
+        if seq_len > split_idx:
+            hs = self.speculative_scan(F, xs[:, split_idx:, :], unrolled)
+        else:
+            hs = unrolled
 
-        # Implementation detail: Q is injected in the composition function
-        def compose(a, b):
-            quantization = Q(a, is_training=True)
-            indices = quantization["encoding_indices"][..., None]
-            composed = jnp.take_along_axis(b, indices, axis=-2)
+        return self.out_filter(hs)
 
-            return (
-                a + composed
-            )  # + quantization["loss"] - jax.lax.stop_gradient(quantization["loss"])
+    def get_split_idx(self, seq_len: int):
+        flag_map = {
+            "UNROLL_FIRST": 1,
+            "UNROLL_ALL": seq_len,
+            "SCAN_LAST": seq_len - 1,
+        }
+        for flag, value in flag_map.items():
+            if int(os.environ.get(flag, 0)):
+                return min(seq_len, max(1, value))
+        return math.ceil(math.log2(seq_len))
 
-        hs = self.scan_phi_step(compose, phi_step, h0)
-
-        return out_filter(hs)
-
-    def get_cell(self, batch_size: int) -> tuple[Any, Callable, Callable]:
+    def get_core(self, batch_size: int) -> tuple[Any, hk.RNNCore]:
         F = hk.LSTM(self.hidden_size)
         h0 = F.initial_state(batch_size)
 
-        # Implementation detail: tree utilities
         self.split_array, self.total_size = get_split_array(h0)
+        self.out_filter = lambda h: h.hidden
 
-        return h0, F, lambda h: h.hidden
+        return h0, F
 
-    def get_quantizer(self) -> tuple[Any, Callable]:
-        Q: hk.nets.VectorQuantizer = hk.nets.VectorQuantizer(
-            self.total_size, self.K, 0.25
-        )
-        S = Q.embeddings.T
+    def unroll(self, F, xs, h0):
+        return hk.dynamic_unroll(F, xs, h0, time_major=False, return_all_states=True)
+
+    def get_quantizer(self) -> tuple[Any, Callable[[Array], Array]]:
+        hk_Q = hk.nets.VectorQuantizer(self.total_size, self.K, 0.25)
+
+        S = hk_Q.embeddings.T
         S = self.split_array(S)
+
+        Q = lambda v: hk_Q(v, is_training=True)
 
         return S, Q
 
-    def restrict_to_S(self, F: Callable, xs: Array, S: Any) -> Any:
-        F = jax.vmap(F, in_axes=(None, 0))
-        F = jax.vmap(F, in_axes=(0, None))
-        F = jax.vmap(F, in_axes=(0, None))
+    def speculative_scan(self, F: hk.RNNCore, xs: Array, unrolled: Array) -> Array:
+        '''Associatively scans the rnn step function F by speculating on previous values
 
-        return F(xs, S)
+        Parameters
+        ----------
+        F : hk.RNNCore
+            RNN step function
+        xs : array_like
+            Input array of shape [B, T_2, E]
+        unrolled : array_like
+            [B, T_1, H]
 
-    def scan_phi_step(self, compose: Callable, phi_step: Array, h0: Array) -> Array:
-        # Implementation detail: the quantizer expects concatenated trees
-        phi_step = concat_tree(phi_step)
-        h0 = concat_tree(h0)
+        Returns
+        -------
+        array_like
+            [B, T_1 + T_2, H]
+        '''
+        S, Q = self.get_quantizer()
 
-        phi_one = jax.lax.associative_scan(
+        S = jax.lax.stop_gradient(S)
+        _, steps = recursive_vmap(F, ((None, 0), (0, None), (0, None)))(xs, S)
+
+        # Q injected in composition function
+        def compose(a, b):
+            q = Q(a)
+            indices = q["encoding_indices"][..., None]
+            composed = jnp.take_along_axis(b, indices, axis=-2)
+
+            return composed + a - jax.lax.stop_gradient(a)
+
+        steps = concat_tree(steps)
+        scanned = jax.lax.associative_scan(
             compose,
-            phi_step,
+            steps,
             axis=1,
         )
 
-        # Implementation detail: the trailing Q is applied here
+        # Applying trailing Q
         compose = jax.vmap(compose, in_axes=(None, 1), out_axes=1)
-        hs = compose(h0[:, None, :], phi_one)[..., 0, :]
-
-        # Implementation detail: reconstructing trees
+        unrolled = concat_tree(unrolled)
+        hs = compose(unrolled[:, -1:, :], scanned)[..., 0, :]
+        hs = jnp.concatenate((unrolled, hs), axis=1)
         hs = self.split_array(hs)
 
         return hs
