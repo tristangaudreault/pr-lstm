@@ -1,4 +1,4 @@
-from typing import Any, Callable
+from typing import Any, Callable, cast
 import math
 import os
 
@@ -9,8 +9,7 @@ import jax.nn as jnn
 import haiku as hk
 import logging
 
-from .utils import concat_tree, get_split_array, print_grad, recursive_vmap
-
+from . import utils
 
 logger = logging.getLogger(__name__)
 
@@ -20,10 +19,10 @@ class Speculative(hk.Module):
 
     Attributes
     ----------
+    K : int
+        Number of speculations points.
     hidden_size : int
         Hidden size of the inner RNN cells.
-    K : int
-        Number of speculations to perform.
     """
 
     def __init__(
@@ -50,54 +49,29 @@ class Speculative(hk.Module):
             Output sequence tensor of shape (B, T, H).
         """
         batch_size, seq_len, embed_dim = xs.shape
-        split_idx = self.get_split_idx(seq_len)
 
-        h0, F = self.get_core(batch_size)
+        F = self.get_core()
 
-        _, hs = hk.dynamic_unroll(
-            F, xs[:, :split_idx, :], h0, time_major=False, return_all_states=True
+        h_0 = F.initial_state(batch_size)
+        self.split_state, self.state_size = utils.get_split_array(h_0)
+
+        max_unroll = self.get_max_unroll(seq_len)
+
+        ys, handoff_state = hk.dynamic_unroll(
+            F, xs[:, :max_unroll, :], h_0, time_major=False
         )
+        ys = cast(Array, ys)
 
-        if seq_len > split_idx:
-            hs = self.speculative_scan(F, xs[:, split_idx:, :], hs)
+        if max_unroll < seq_len:
+            ys_ext = self.speculative_scan(F, xs[:, max_unroll:, :], handoff_state)
+            ys = jnp.concatenate((ys, ys_ext), axis=1)
 
-        return self.out_filter(hs)
+        return ys
 
-    def get_core(self, batch_size: int) -> tuple[Any, hk.RNNCore]:
-        F = hk.LSTM(self.hidden_size)
-        h0 = F.initial_state(batch_size)
+    def get_core(self) -> hk.RNNCore:
+        return hk.LSTM(self.hidden_size)
 
-        self.split_array, self.total_size = get_split_array(h0)
-        self.out_filter = lambda h: h.hidden
-
-        return h0, F
-
-    def make_scannable(
-        self, F: Callable, xs: Array
-    ) -> tuple[Callable[[Array, Array], Array], Array]:
-        hk_Q = hk.nets.VectorQuantizer(self.total_size, self.K, 0.25)
-
-        S = hk_Q.embeddings.T
-        S = self.split_array(S)
-
-        Q = lambda v: hk_Q(v, is_training=True)
-
-        S = jax.lax.stop_gradient(S)
-
-        _, steps = recursive_vmap(F, ((None, 0), (0, None), (0, None)))(xs, S)
-        steps = concat_tree(steps)
-
-        # Q injected in composition function
-        def compose(a, b):
-            q = Q(a)
-            indices = q["encoding_indices"][..., None]
-            composed = jnp.take_along_axis(b, indices, axis=-2)
-
-            return composed + a - jax.lax.stop_gradient(a)
-
-        return compose, steps
-
-    def speculative_scan(self, F: hk.RNNCore, xs: Array, unrolled: Array) -> Array:
+    def speculative_scan(self, F: hk.RNNCore, xs: Array, init: Any) -> Array:
         """Associatively scans the rnn step function F by speculating on previous values
 
         Parameters
@@ -105,46 +79,67 @@ class Speculative(hk.Module):
         F : hk.RNNCore
             RNN step function
         xs : array_like
-            Input array of shape [B, T_2, E]
-        unrolled : array_like
-            [B, T_1, H]
+            Input array of shape (B, T, E)
+        init_state : array_like
+            Initial state array of shape (B, H). Collapses speculations
 
         Returns
         -------
         array_like
-            [B, T_1 + T_2, H]
+            Scanned outputs of shape (B, T, H)
         """
-        unrolled = concat_tree(unrolled)
-
-        fn, elems = self.make_scannable(F, xs)
-        scanned = jax.lax.associative_scan(
+        fn, elems, init_elem = self.build_scan(F, xs, init)
+        out_elems = jax.lax.associative_scan(
             fn,
             elems,
             axis=1,
         )
 
-        # Applying trailing Q
-        compose = jax.vmap(fn, in_axes=(None, 1), out_axes=1)
-        hs = compose(unrolled[:, -1:, :], scanned)[..., 0, :]
-        hs = jnp.concatenate((unrolled, hs), axis=1)
+        fn_init = jax.vmap(fn, in_axes=(None, 1), out_axes=1)
+        ys, _ = fn_init(init_elem, out_elems)
+        ys = ys[..., 0, :]
 
-        hs = self.split_array(hs)
+        return ys
 
-        return hs
+    def build_scan(
+        self, F: Callable, xs: Array, init: Any
+    ) -> tuple[Callable, tuple[Array, Array], tuple[Array, Array]]:
+        def compose(a, b):
+            _, a_q = a
+            b_y, b_q = b
 
-    def get_split_idx(self, seq_len: int) -> int:
-        if int(os.environ.get("UNROLL_FIRST", 0)):
-            split_idx = 1
-        elif int(os.environ.get("UNROLL_ALL", 0)):
-            split_idx = seq_len
-        elif int(os.environ.get("SCAN_LAST", 0)):
-            split_idx = seq_len - 1
+            return (a_q @ b_y, a_q @ b_q)
+
+        S = hk.get_parameter(
+            "S",
+            (self.K, self.state_size),
+            init=hk.initializers.RandomUniform(-1, 1),
+        )
+
+        k_ys, k_hs = utils.recursive_vmap(F, ((None, 0), (0, None), (0, None)))(
+            xs, self.split_state(S)
+        )
+        k_hs = utils.concat_tree(k_hs)
+        kq_hs = utils.soft_quantize(k_hs, S)
+
+        init_y = utils.concat_tree(init)[:, None, :]
+        init_q = utils.soft_quantize(init_y, S)
+
+        return compose, (k_ys, kq_hs), (init_y, init_q)
+
+    def get_max_unroll(self, seq_len: int) -> int:
+        if (N := os.environ.get("MAX_UNROLL")) is not None:
+            max_unroll = int(N)
+        elif (N := os.environ.get("MAX_SCAN")) is not None:
+            max_unroll = seq_len - int(N)
         else:
-            split_idx = math.ceil(math.log2(seq_len))
+            max_unroll = math.ceil(math.log2(seq_len))
 
-        split_idx = min(seq_len, max(1, split_idx))
+        max_unroll = min(seq_len, max(1, max_unroll))
 
         if hk.running_init():
-            logger.debug("%d / %d (unrolled / scanned)", split_idx, seq_len - split_idx)
+            logger.debug(
+                "%d / %d (unrolled / scanned)", max_unroll, seq_len - max_unroll
+            )
 
-        return split_idx
+        return max_unroll
