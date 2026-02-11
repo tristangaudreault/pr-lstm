@@ -15,6 +15,32 @@ from . import utils
 logger = logging.getLogger(__name__)
 
 
+class CrossTemporal(hk.Module):
+    def __init__(self, hidden_size: int, name: str | None = None):
+        super().__init__(name=name)
+        self.hidden_size = hidden_size
+
+    def __call__(self, xs: jax.Array):
+        batch_size = xs.shape[0]
+
+        R = hk.LSTM(self.hidden_size)
+        i_0 = jnn.tanh(hk.Linear(self.hidden_size)(xs))
+        j_0 = R.initial_state(batch_size)
+        y_1, j_1 = jax.vmap(R, in_axes=(1, None), out_axes=1)(i_0, j_0)
+
+        R = jax.vmap(R)
+
+        def fn(inputs, prev_state):
+            (inputs, _), (_, prev_state) = inputs, prev_state
+            y, h = R(inputs, prev_state)
+
+            return y, h
+
+        ys, hs = jax.lax.associative_scan(fn, (y_1, j_1), axis=1)
+
+        return ys
+
+
 class Speculative(hk.Module):
     """Speculative model.
 
@@ -100,9 +126,11 @@ class Speculative(hk.Module):
             axis=1,
         )
 
-        fn_init = jax.vmap(partial(fn, residual=False), in_axes=(None, 1), out_axes=1)
+        fn_init = jax.vmap(fn, in_axes=(None, 1), out_axes=1)
         ys, _ = fn_init(init_elem, out_elems)
         ys = ys[..., 0, :]
+
+        # print(ys[0])
 
         return ys
 
@@ -112,16 +140,22 @@ class Speculative(hk.Module):
         S = hk.get_parameter(
             "S",
             (self.K, self.state_size),
-            init=hk.initializers.RandomNormal(),
+            init=hk.initializers.RandomUniform(minval=-1, maxval=1),
         )
-        # S = jax.lax.stop_gradient(S)
 
-        def fn(a, b, residual=True):
+        def fn(a, b):
             a_y, a_h = a
             b_y, b_h = b
 
-            w = utils.soft_quantize(a_h, S, temperature=1e-1)
-            return (a_y + w @ b_y, a_h + w @ b_h)
+            # a_h = hypermap(a_h)
+
+            w = utils.soft_quantize(a_h, S)
+            # d = utils.soft_quantize_dists(a_h, S)
+            # w = jnn.softmax(
+            #     -(d + hypermap(d)) / 1e-1
+            # )
+            # utils.soft_quantize((S + a_h) if residual else a_h, S, temperature=1e-1)
+            return (w @ b_y, w @ b_h)
 
         k_ys, k_hs = utils.recursive_vmap(F, ((None, 0), (0, None), (0, None)))(
             xs, self.split_state(S)
@@ -129,9 +163,8 @@ class Speculative(hk.Module):
         k_hs = utils.concat_tree(k_hs)
 
         init_y, init_h = init_elem
-        init_y = init_y[:, None, :]
-        init_h = utils.concat_tree(init_h)[:, None, :]
-
+        init_h = utils.concat_tree(init_h)
+        init_y, init_h = init_y[:, None, :], init_h[:, None, :]
         return fn, (k_ys, k_hs), (init_y, init_h)
 
     def get_max_unroll(self, seq_len: int) -> int:
