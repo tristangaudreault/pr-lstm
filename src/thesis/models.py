@@ -14,6 +14,31 @@ from . import utils
 
 logger = logging.getLogger(__name__)
 
+# jax.config.update("jax_log_compiles", True)
+
+
+def scan_step(fn, xs, offset=1):
+    super_slice = lambda tree, slice_obj: jax.tree.map(
+        lambda leaf: leaf[:, slice_obj, :], tree
+    )
+
+    if offset >= xs[0].shape[1]:
+        return xs
+
+    a = super_slice(xs, slice(None, -offset))
+    b = super_slice(xs, slice(offset, None))
+
+    carries = super_slice(xs, slice(None, offset))
+    updates = fn(a, b)
+
+    y = jax.tree.map(
+        lambda carry, update: jnp.concatenate((carry, update), axis=1), carries, updates
+    )
+
+    # jax.tree.map(lambda leaf: print(leaf.shape), y)
+
+    return scan_step(fn, y, offset * 2)
+
 
 class CrossTemporal(hk.Module):
     def __init__(self, hidden_size: int, name: str | None = None):
@@ -21,24 +46,35 @@ class CrossTemporal(hk.Module):
         self.hidden_size = hidden_size
 
     def __call__(self, xs: jax.Array):
-        batch_size = xs.shape[0]
+        seq_len = xs.shape[-1]
+        embdeddings = hk.Linear(self.hidden_size)(xs)
+
+        ys, hs = self.single_pass(embdeddings)
+        for _ in range(math.floor(math.log2(math.log2(seq_len)))):
+            # new_ys, _ = self.single_pass(ys[:, seq_len // 2 :, :])
+            # ys = jnp.concatenate((ys[:, : seq_len // 2, :], new_ys), axis=1)
+            ys, _ = self.single_pass(ys)
+
+        return ys
+
+    def single_pass(self, xs):
+        batch_size, seq_len, embed_dim = xs.shape
 
         R = hk.LSTM(self.hidden_size)
-        i_0 = jnn.tanh(hk.Linear(self.hidden_size)(xs))
         j_0 = R.initial_state(batch_size)
-        y_1, j_1 = jax.vmap(R, in_axes=(1, None), out_axes=1)(i_0, j_0)
+        y_1, j_1 = jax.vmap(R, in_axes=(1, None), out_axes=1)(xs, j_0)
 
         R = jax.vmap(R)
 
-        def fn(inputs, prev_state):
-            (inputs, _), (_, prev_state) = inputs, prev_state
-            y, h = R(inputs, prev_state)
+        def make_fn(op):
+            def fn(a, b):
+                (inputs, (_, _)), (_, prev_state) = a, b
 
-            return y, h
+                return op(inputs, prev_state)
 
-        ys, hs = jax.lax.associative_scan(fn, (y_1, j_1), axis=1)
+            return fn
 
-        return ys
+        return jax.lax.associative_scan(make_fn(R), (y_1, j_1), axis=1)
 
 
 class Speculative(hk.Module):
