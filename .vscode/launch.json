@@ -1,0 +1,32 @@
+{
+    "configurations": [
+        {
+            "name": "Run Experiment",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/experiments/main.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--task-name",
+                "cycle_navigation",
+                "--training-steps",
+                "50000",
+                "--testing-range",
+                "10",
+                "20",
+                "50",
+                "100",
+                "250",
+                "500",
+                "--log-frequency",
+                "5000",
+                "-N",
+                "10",
+                "--hidden-size",
+                "256",
+                "-K",
+                "8"
+            ],
+        }
+    ]
+}

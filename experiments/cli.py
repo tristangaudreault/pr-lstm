@@ -1,10 +1,19 @@
-from argparse import ArgumentParser, Namespace
+from typing import Callable, cast
+from argparse import ArgumentParser
 from pathlib import Path
+import logging
+import time
+from contextlib import contextmanager, AbstractContextManager, ExitStack
+import os
+import jax
 
-from neural_networks_chomsky_hierarchy.experiments import constants
+from interfaces import nnch
 
 
-def parse_args() -> Namespace:
+logger = logging.getLogger("thesis." + __name__)
+
+
+def get_parser() -> ArgumentParser:
     parser = ArgumentParser()
 
     # Logging
@@ -25,7 +34,7 @@ def parse_args() -> Namespace:
     parser.add_argument(
         "--log-frequency",
         type=int,
-        default=50_000,
+        default=5_000,
         help="number iterations between log entries",
     )
 
@@ -33,14 +42,14 @@ def parse_args() -> Namespace:
     parser.add_argument(
         "--task-name",
         type=str,
-        choices=constants.TASK_BUILDERS.keys(),
+        choices=nnch.get_task_names(),
         default="even_pairs",
         help="length generalization task",
     )
     parser.add_argument(
         "--training-steps",
         type=int,
-        default=1_000_000,
+        default=100_000,
         help="number of training steps",
     )
     parser.add_argument(
@@ -68,7 +77,9 @@ def parse_args() -> Namespace:
         help="maximum training sequence length (inclusive)",
     )
     parser.add_argument(
+        "-M",
         "--testing-range",
+        nargs="+",
         type=int,
         default=500,
         help="maximum length of testing sequences",
@@ -84,13 +95,24 @@ def parse_args() -> Namespace:
         default=0,
         help=("number of computation tokens to append (as multiple of input length)"),
     )
+    parser.add_argument(
+        "-a",
+        "--alpha",
+        type=float,
+        default=0.0,
+        help=("log-uniform scaling factor for sequence lengths"),
+    )
+
+    # IO
+    parser.add_argument("--save-model", type=Path)
+    parser.add_argument("--load-model", type=Path)
 
     # Model
     parser.add_argument(
         "--model-name",
         type=str,
-        choices=constants.MODEL_BUILDERS.keys(),
-        default="speculative",
+        choices=nnch.get_model_names(),
+        default="cross_temporal",
         help="model architecture",
     )
     parser.add_argument(
@@ -123,19 +145,9 @@ def parse_args() -> Namespace:
         help="total number of vectors that can be stacked",
     )
 
-    # Speculative
-    parser.add_argument(
-        "--J", "-J", type=int, help="number of intependant speculative units"
-    )
-    parser.add_argument(
-        "--K", "-K", type=int, default=None, help="number of speculations per unit"
-    )
-    parser.add_argument(
-        "--temperature",
-        "--tau",
-        type=float,
-        default=1.0,
-        help="speculation selection temperature",
-    )
+    return parser
 
-    return parser.parse_args()
+
+def get_args():
+    parser = get_parser()
+    return vars(parser.parse_args())

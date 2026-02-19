@@ -18,6 +18,7 @@ dependencies = [
   "optax",
   "tqdm",
   "typing-extensions",
+  "flax",
 ]
 authors = [
   { name = "Tristan Gaudreault", email = "tristan@tristangaudreault.com" },
