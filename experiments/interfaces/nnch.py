@@ -58,7 +58,7 @@ def _filter_kwargs(model_builder: Callable, kwargs: dict) -> dict:
 
 def _make_model(
     output_size: int,
-    inner_core: type[thesis.models.CrossTemporal],
+    inner_core: type[thesis.model.CrossTemporal],
     return_all_outputs: bool = False,
     input_window: int = 1,
     **model_kwargs: Any,
@@ -80,7 +80,7 @@ nnch.constants.MODEL_BUILDERS.update(
     {
         "gru": partial(nnch.rnn.make_rnn, rnn_core=hk.GRU),
         "linear_rnn": partial(nnch.rnn.make_rnn, rnn_core=extras.LinearRNN),
-        "cross_temporal": partial(_make_model, inner_core=thesis.models.CrossTemporal),
+        "cross_temporal": partial(_make_model, inner_core=thesis.model.CrossTemporal),
     }
 )
 
