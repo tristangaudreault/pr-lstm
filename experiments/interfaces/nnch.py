@@ -1,16 +1,20 @@
 """This module interfaces with the repository https://github.com/google-deepmind/neural_networks_chomsky_hierarchy."""
 
-from typing import Any, Callable
+from typing import Any, Callable, Collection, Sequence
 import inspect
 from functools import partial
 from typing import cast
 import logging
 import math
+from collections import namedtuple
+import time
+from pathlib import Path
 
 import haiku as hk
 import jax
 import jax.numpy as jnp
 import jax.nn as jnn
+import jax.scipy as jsp
 from flax import serialization
 
 import external
@@ -22,8 +26,8 @@ import utils
 logger = logging.getLogger("thesis." + __name__)
 
 
-def get_task_names():
-    return nnch.constants.TASK_BUILDERS.keys()
+def get_task_names() -> list[str]:
+    return list(nnch.constants.TASK_BUILDERS.keys())
 
 
 def get_model_names():
@@ -58,7 +62,7 @@ def _filter_kwargs(model_builder: Callable, kwargs: dict) -> dict:
 
 def _make_model(
     output_size: int,
-    inner_core: type[thesis.model.CrossTemporal],
+    inner_core: type[thesis.model.CRNN],
     return_all_outputs: bool = False,
     input_window: int = 1,
     **model_kwargs: Any,
@@ -70,6 +74,7 @@ def _make_model(
 
         output = jnn.relu(output)
         output = hk.Linear(output_size)(output)
+        # output = jnn.relu(output)
 
         return output
 
@@ -80,15 +85,14 @@ nnch.constants.MODEL_BUILDERS.update(
     {
         "gru": partial(nnch.rnn.make_rnn, rnn_core=hk.GRU),
         "linear_rnn": partial(nnch.rnn.make_rnn, rnn_core=extras.LinearRNN),
-        "cross_temporal": partial(_make_model, inner_core=thesis.model.CrossTemporal),
+        "crnn": partial(_make_model, inner_core=thesis.model.CRNN),
     }
 )
 
 
 @utils.log_context(logger, "training setup")
 def make_training_params(
-    alpha: float,
-    min_training_range: int,
+    training_lengths: Sequence[int],
     training_range: int,
     task_name: str,
     model_name: str,
@@ -99,14 +103,12 @@ def make_training_params(
     batch_size: int,
     learning_rate: int,
     testing_range: int,
+    test_batch_size: int,
+    test_batches: int,
     **kwargs,
 ):
     # Create the task.
-    log_uniform_values = [
-        math.floor(i + (alpha**i))
-        for i in range(min_training_range, training_range + 1)
-    ]
-    curriculum = nnch.curriculum_lib.UniformCurriculum(values=log_uniform_values)
+    curriculum = nnch.curriculum_lib.UniformCurriculum(training_lengths)
     with utils.log_context(logger, f'"{task_name}" task build'):
         task = cast(nnch.GeneralizationTask, nnch.constants.TASK_BUILDERS[task_name]())
 
@@ -155,25 +157,27 @@ def make_training_params(
         accuracy_fn=accuracy_fn,
         compute_full_range_test=False,
         max_range_test_length=testing_range,
-        range_test_total_batch_size=2048,
-        range_test_sub_batch_size=128,
+        range_test_total_batch_size=test_batches * test_batch_size,
+        range_test_sub_batch_size=test_batch_size,
         is_autoregressive=autoregressive,
     )
     return training_params
 
 
 @utils.log_context(logger, "testing setup")
-def make_evaluation_params(training_params, params):
+def make_evaluation_params(config, training_params, params):
     evaluation_params = nnch.range_evaluation.EvaluationParams(
         model=training_params.model,
         params=params,
         accuracy_fn=training_params.accuracy_fn,
         sample_batch=training_params.task.sample_batch,
-        max_test_length=training_params.max_range_test_length,
+        max_test_length=config["testing_lengths"],
         total_batch_size=training_params.range_test_total_batch_size,
         sub_batch_size=training_params.range_test_sub_batch_size,
         is_autoregressive=training_params.is_autoregressive,
     )
+    setattr(evaluation_params, "testing_lengths", config["testing_lengths"])
+    setattr(evaluation_params, "hook", config["hook"])
     return evaluation_params
 
 
@@ -182,6 +186,7 @@ def main(config: dict):
     # IO
     save_path = config["save_model"]
     load_path = config["load_model"]
+    auto_path = Path(f"./saved/{config['task_name']}/{config['model_name']}.msgpack")
 
     # Training
     training_params = make_training_params(**config)
@@ -191,18 +196,22 @@ def main(config: dict):
     use_tqdm = "tqdm" in config["log_handlers"]
     training_worker = nnch.training.TrainingWorker(training_params, use_tqdm=use_tqdm)
     with utils.log_context(logger, "training"):
-        results, _, params = training_worker.run()
+        training_results, _, params = training_worker.run()
 
     # IO
     if save_path:
+        if save_path == Path("auto"):
+            save_path = auto_path
         with utils.log_context(logger, f'saving model parameters to "{save_path}"'):
             utils.save_flax(params, save_path)
     if load_path:
+        if load_path == Path("auto"):
+            load_path = auto_path
         with utils.log_context(logger, f'loading model parameters from "{load_path}"'):
             params = utils.load_flax(params, load_path)
 
     # Testing
-    evaluation_params = make_evaluation_params(training_params, params)
+    evaluation_params = make_evaluation_params(config, training_params, params)
     with jax.disable_jit():
         with utils.log_context(logger, "range evaluation"):
             evaluation_results = nnch.range_evaluation.range_evaluation(
@@ -210,10 +219,20 @@ def main(config: dict):
             )
 
     # Final score
+    logger.info(
+        "".join(
+            f"({log_data["test/length"]},{(log_data["test/accuracy"]*100):.2f})"
+            for log_data in evaluation_results
+        )
+    )
     accuracies = jnp.array(
         [log_data["test/accuracy"] for log_data in evaluation_results]
     )
     score = jnp.mean(accuracies)
     logger.info({"test/network_score": score})
 
-    return results, params, evaluation_results
+    return (
+        params,
+        (training_params, training_results),
+        (evaluation_params, evaluation_results),
+    )

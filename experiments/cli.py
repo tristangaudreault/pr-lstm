@@ -2,12 +2,11 @@ from typing import Callable, cast
 from argparse import ArgumentParser
 from pathlib import Path
 import logging
-import time
-from contextlib import contextmanager, AbstractContextManager, ExitStack
-import os
-import jax
+import sympy as sp
+import inspect
 
 from interfaces import nnch
+import hooks
 
 
 logger = logging.getLogger("thesis." + __name__)
@@ -20,8 +19,8 @@ def get_parser() -> ArgumentParser:
     parser.add_argument(
         "--log-level",
         type=str.upper,
+        choices=list(logging.getLevelNamesMapping().keys()),
         default="INFO",
-        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         help="level of logging",
     )
     parser.add_argument(
@@ -29,7 +28,7 @@ def get_parser() -> ArgumentParser:
         nargs="*",
         default=["logging"],
         choices=["tqdm", "logging", "wandb"],
-        help="logging handlers to use",
+        help="active logging tools",
     )
     parser.add_argument(
         "--log-frequency",
@@ -37,14 +36,22 @@ def get_parser() -> ArgumentParser:
         default=5_000,
         help="number iterations between log entries",
     )
+    parser.add_argument(
+        "--log-file",
+        type=Path,
+        default=None,
+        help="path to log file",
+    )
 
     # Experiment
+    task_names = nnch.get_task_names()
     parser.add_argument(
         "--task-name",
         type=str,
-        choices=nnch.get_task_names(),
-        default="even_pairs",
-        help="length generalization task",
+        choices=task_names,
+        default=task_names,
+        nargs="+",
+        help="name of tasks to execute",
     )
     parser.add_argument(
         "--training-steps",
@@ -63,26 +70,42 @@ def get_parser() -> ArgumentParser:
         "-lr", "--learning-rate", type=float, default=1e-3, help="learning rate"
     )
     parser.add_argument(
-        "--min-training-range",
-        type=int,
-        default=1,
-        help="minimum length of training sequences",
+        "--training-expr",
+        type=sp.sympify,
+        default="n",
+        help="sympy expression to generate N sequence lengths from a function of n",
     )
     parser.add_argument(
         "-N",
         "--training-range",
-        "--max-training-range",
         type=int,
         default=40,
         help="maximum training sequence length (inclusive)",
     )
     parser.add_argument(
+        "--testing-expr",
+        type=sp.sympify,
+        default="n",
+        help="sympy expression to generate N sequence lengths from a function of n",
+    )
+    parser.add_argument(
         "-M",
         "--testing-range",
-        nargs="+",
         type=int,
         default=500,
         help="maximum length of testing sequences",
+    )
+    parser.add_argument(
+        "--test-batch-size",
+        type=int,
+        default=64,
+        help="sub batch size for range evaluation",
+    )
+    parser.add_argument(
+        "--test-batches",
+        type=int,
+        default=8,
+        help="number of test batches to average over",
     )
     parser.add_argument(
         "--autoregressive",
@@ -95,24 +118,26 @@ def get_parser() -> ArgumentParser:
         default=0,
         help=("number of computation tokens to append (as multiple of input length)"),
     )
-    parser.add_argument(
-        "-a",
-        "--alpha",
-        type=float,
-        default=0.0,
-        help=("log-uniform scaling factor for sequence lengths"),
-    )
 
     # IO
-    parser.add_argument("--save-model", type=Path)
-    parser.add_argument("--load-model", type=Path)
+    parser.add_argument(
+        "--save-model",
+        type=Path,
+        help="path to save the model parameters. Use 'auto' to automatically save to './saved/{task-name}/{model-name}",
+    )
+    parser.add_argument(
+        "--load-model",
+        type=Path,
+        help="path to load the model parameters. Use 'auto' to automatically load from './saved/{task-name}/{model-name}",
+    )
 
     # Model
     parser.add_argument(
         "--model-name",
         type=str,
         choices=nnch.get_model_names(),
-        default="cross_temporal",
+        default=["crnn"],
+        nargs="+",
         help="model architecture",
     )
     parser.add_argument(
@@ -143,6 +168,12 @@ def get_parser() -> ArgumentParser:
         type=int,
         default=128,
         help="total number of vectors that can be stacked",
+    )
+
+    parser.add_argument(
+        "--hook",
+        choices=[name for name, obj in inspect.getmembers(hooks, inspect.isfunction)],
+        help="hook to use"
     )
 
     return parser

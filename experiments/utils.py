@@ -1,4 +1,4 @@
-from typing import cast, Callable
+from typing import Any, cast, Callable, Sequence
 from contextlib import ContextDecorator, ExitStack, AbstractContextManager
 import time
 import logging
@@ -42,11 +42,6 @@ class log_context(ContextDecorator):
 
 
 def logging_setup(fn: Callable, config: dict):
-    logging.basicConfig(level=logging.WARNING)
-
-    log_level = getattr(logging, config["log_level"].upper(), logging.WARNING)
-    logging.getLogger("thesis").setLevel(log_level)
-
     with ExitStack() as stack:
         if "wandb" in config["log_handlers"]:
             import wandb
@@ -139,3 +134,11 @@ class CSVFormatter(logging.Formatter):
         else:
             return super().format(record)
         return formatted
+
+
+def tex_plot(data: Sequence[tuple[int, float]]):
+    return "".join([f"({x},{y:.2f})" for x, y in data])
+
+
+def tex_tablerow(data: Sequence[tuple[int, float]]):
+    return " & ".join([f"${y:.2f}$" for x, y in data])
