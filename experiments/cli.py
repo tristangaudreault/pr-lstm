@@ -1,19 +1,28 @@
-from typing import Callable, cast
 from argparse import ArgumentParser
 from pathlib import Path
 import logging
 import sympy as sp
-import inspect
 
 import pluggy
 
-from interfaces import nnch
+from plugins import nnch
+import plugin_manager
 
 logger = logging.getLogger("thesis." + __name__)
 
 
-def get_parser(pm: pluggy.PluginManager) -> ArgumentParser:
+def get_parser() -> ArgumentParser:
     parser = ArgumentParser()
+
+    parser.add_argument(
+        "--plugins",
+        nargs="*",
+        choices=[
+            p.name for p in plugin_manager.get_pm().get_plugins() if hasattr(p, "name")
+        ],
+        default=[],
+        help="optional plugins to enable",
+    )
 
     # Logging
     parser.add_argument(
@@ -168,14 +177,6 @@ def get_parser(pm: pluggy.PluginManager) -> ArgumentParser:
         type=int,
         default=128,
         help="total number of vectors that can be stacked",
-    )
-
-    parser.add_argument(
-        "--plugins",
-        nargs="*",
-        choices=[p.name for p in pm.get_plugins() if hasattr(p, "name")],
-        default=[],
-        help="hook to use",
     )
 
     return parser

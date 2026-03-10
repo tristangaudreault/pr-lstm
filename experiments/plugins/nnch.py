@@ -9,6 +9,7 @@ import math
 from collections import namedtuple
 import time
 from pathlib import Path
+from operator import itemgetter
 
 import haiku as hk
 import jax
@@ -17,11 +18,10 @@ import jax.nn as jnn
 import jax.scipy as jsp
 from flax import serialization
 
-import external
 from external import nnch
 import thesis
-import extras
 import utils
+from hooks import hookimpl
 
 logger = logging.getLogger("thesis." + __name__)
 
@@ -84,7 +84,6 @@ def _make_model(
 nnch.constants.MODEL_BUILDERS.update(
     {
         "gru": partial(nnch.rnn.make_rnn, rnn_core=hk.GRU),
-        "linear_rnn": partial(nnch.rnn.make_rnn, rnn_core=extras.LinearRNN),
         "crnn": partial(_make_model, inner_core=thesis.model.CRNN),
     }
 )
@@ -165,68 +164,53 @@ def make_training_params(
 
 
 @utils.log_context(logger, "testing setup")
-def make_evaluation_params(config, training_params, params):
+def make_evaluation_params(run_config, training_params, params):
     evaluation_params = nnch.range_evaluation.EvaluationParams(
         model=training_params.model,
         params=params,
         accuracy_fn=training_params.accuracy_fn,
         sample_batch=training_params.task.sample_batch,
-        max_test_length=config["testing_lengths"],
+        max_test_length=run_config["testing_lengths"],
         total_batch_size=training_params.range_test_total_batch_size,
         sub_batch_size=training_params.range_test_sub_batch_size,
         is_autoregressive=training_params.is_autoregressive,
     )
-    setattr(evaluation_params, "testing_lengths", config["testing_lengths"])
-    setattr(evaluation_params, "hook", config["hook"])
+    setattr(evaluation_params, "testing_lengths", run_config["testing_lengths"])
+    setattr(evaluation_params, "hook", run_config["hook"])
     return evaluation_params
 
 
-def main(config: dict):
-    """Runs a full training and testing sequence."""
-    # IO
-    save_path = config["save_model"]
-    load_path = config["load_model"]
-    auto_path = Path(f"./saved/{config['task_name']}/{config['model_name']}.msgpack")
+class NNCHPlugin:
+    @hookimpl
+    def run_setup(self, run_config: dict):
+        run_config["training_params"] = make_training_params(**run_config)
 
-    # Training
-    training_params = make_training_params(**config)
-    if load_path:
-        logger.info("Load path provided. Overriding training step count to 0.")
-        training_params.training_steps = 0
-    use_tqdm = "tqdm" in config["log_handlers"]
-    training_worker = nnch.training.TrainingWorker(training_params, use_tqdm=use_tqdm)
-    with utils.log_context(logger, "training"):
-        training_results, _, params = training_worker.run()
+    @hookimpl
+    def train(self, run_config: dict):
+        training_params = run_config["training_params"]
+        use_tqdm = "tqdm" in run_config["log_handlers"]
+        training_worker = nnch.training.TrainingWorker(
+            training_params, use_tqdm=use_tqdm
+        )
+        with utils.log_context(logger, "training"):
+            training_results, _, params = training_worker.run()
 
-    # IO
-    if save_path:
-        if save_path == Path("auto"):
-            save_path = auto_path
-        with utils.log_context(logger, f'saving model parameters to "{save_path}"'):
-            utils.save_flax(params, save_path)
-    if load_path:
-        if load_path == Path("auto"):
-            load_path = auto_path
-        with utils.log_context(logger, f'loading model parameters from "{load_path}"'):
-            params = utils.load_flax(params, load_path)
+        return {"training_params": training_params, "params": params}
 
-    # Testing
-    evaluation_params = make_evaluation_params(config, training_params, params)
-    with jax.disable_jit():
-        with utils.log_context(logger, "range evaluation"):
-            evaluation_results = nnch.range_evaluation.range_evaluation(
-                evaluation_params, use_tqdm=False
-            )
+    @hookimpl
+    def test(self, run_config, test_payload):
+        evaluation_params = make_evaluation_params(
+            run_config, test_payload["training_params"], test_payload["params"]
+        )
+        with jax.disable_jit():
+            with utils.log_context(logger, "range evaluation"):
+                evaluation_results = nnch.range_evaluation.range_evaluation(
+                    evaluation_params, use_tqdm=False
+                )
 
-    # Final score
-    accuracies = jnp.array(
-        [log_data["test/accuracy"] for log_data in evaluation_results]
-    )
-    score = jnp.mean(accuracies)
-    logger.info({"test/network_score": score})
-
-    return (
-        params,
-        (training_params, training_results),
-        (evaluation_params, evaluation_results),
-    )
+        # Final score
+        accuracies = jnp.array(
+            [log_data["test/accuracy"] for log_data in evaluation_results]
+        )
+        score = jnp.mean(accuracies)
+        logger.info({"test/network_score": score})
