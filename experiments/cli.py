@@ -5,14 +5,14 @@ import logging
 import sympy as sp
 import inspect
 
-from interfaces import nnch
-import hooks
+import pluggy
 
+from interfaces import nnch
 
 logger = logging.getLogger("thesis." + __name__)
 
 
-def get_parser() -> ArgumentParser:
+def get_parser(pm: pluggy.PluginManager) -> ArgumentParser:
     parser = ArgumentParser()
 
     # Logging
@@ -171,14 +171,11 @@ def get_parser() -> ArgumentParser:
     )
 
     parser.add_argument(
-        "--hook",
-        choices=[name for name, obj in inspect.getmembers(hooks, inspect.isfunction)],
-        help="hook to use"
+        "--plugins",
+        nargs="*",
+        choices=[p.name for p in pm.get_plugins() if hasattr(p, "name")],
+        default=[],
+        help="hook to use",
     )
 
     return parser
-
-
-def get_args():
-    parser = get_parser()
-    return vars(parser.parse_args())

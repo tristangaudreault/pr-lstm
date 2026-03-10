@@ -219,12 +219,6 @@ def main(config: dict):
             )
 
     # Final score
-    logger.info(
-        "".join(
-            f"({log_data["test/length"]},{(log_data["test/accuracy"]*100):.2f})"
-            for log_data in evaluation_results
-        )
-    )
     accuracies = jnp.array(
         [log_data["test/accuracy"] for log_data in evaluation_results]
     )
