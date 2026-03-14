@@ -10,13 +10,10 @@ logger = logging.getLogger("thesis." + __name__)
 
 
 class SpeedPlugin:
-    name = "speed"
-
-    def __init__(self):
-        self.tex_data = []
+    toggle_name = "speed"
 
     @hookimpl
-    def test_length_end(self, log_data: dict, outputs, batch, apply_fn, params):
+    def test_log(self, log_data: dict, outputs, batch, apply_fn, params):
         iterations = 32
         key = jax.random.PRNGKey(0)
         keys = jax.random.split(key, iterations)
@@ -36,9 +33,13 @@ class SpeedPlugin:
         )
         self.tex_data.append((log_data["test/length"], average_time_ms))
 
-    @hookimpl
-    def run_teardown(self, run_config: dict):
+    @hookimpl(wrapper=True)
+    def run(self):
+        self.tex_data = []
+
+        results = yield
+
         logger.info(utils.tex_plot(self.tex_data))
         logger.info(utils.tex_tablerow(self.tex_data))
 
-        self.__init__()
+        return results

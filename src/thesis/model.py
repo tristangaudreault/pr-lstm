@@ -3,6 +3,7 @@ import logging
 
 import jax
 import jax.numpy as jnp
+import jax.nn as jnn
 import haiku as hk
 
 from . import utils
@@ -25,16 +26,13 @@ class CRNN(hk.Module):
         self.use_h0 = use_h0
 
     def __call__(self, xs: jax.Array) -> jax.Array:
-        cell = self.get_cell()
-
         batch_size = xs.shape[self.batch_axis]
+
+        cell = self.get_cell()
         h0 = cell.initial_state(batch_size)
+
         gs = self.intermediate_map(xs, h0)
-
         ys = self.scan(cell, gs)
-
-        if self.use_h0:
-            ys = ys[:, 1:, :]
 
         return ys
 
@@ -59,7 +57,7 @@ class CRNN(hk.Module):
 
         return utils.map_with_index(leaf_map, h0)
 
-    def scan(self, cell: hk.RNNCore, gs: Any):
+    def scan(self, cell: hk.RNNCore, gs: Any, reverse: bool = False):
         cell_vmap = jax.vmap(cell, in_axes=self.time_axis, out_axes=self.time_axis)
 
         def operator(a, b):
@@ -70,8 +68,12 @@ class CRNN(hk.Module):
         hs = jax.lax.associative_scan(
             operator,
             gs,
+            reverse=reverse,
             axis=self.time_axis,
         )
         ys = jax.tree.leaves(hs)[0]
+
+        if self.use_h0:
+            ys = ys[:, 1:, :]
 
         return ys

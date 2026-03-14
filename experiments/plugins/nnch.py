@@ -1,22 +1,17 @@
 """This module interfaces with the repository https://github.com/google-deepmind/neural_networks_chomsky_hierarchy."""
 
-from typing import Any, Callable, Collection, Sequence
+from typing import Any, Callable
 import inspect
 from functools import partial
 from typing import cast
 import logging
-import math
-from collections import namedtuple
-import time
-from pathlib import Path
-from operator import itemgetter
+import random
+import argparse
 
 import haiku as hk
 import jax
 import jax.numpy as jnp
 import jax.nn as jnn
-import jax.scipy as jsp
-from flax import serialization
 
 from external import nnch
 import thesis
@@ -24,14 +19,6 @@ import utils
 from hooks import hookimpl
 
 logger = logging.getLogger("thesis." + __name__)
-
-
-def get_task_names() -> list[str]:
-    return list(nnch.constants.TASK_BUILDERS.keys())
-
-
-def get_model_names():
-    return nnch.constants.MODEL_BUILDERS.keys()
 
 
 def _filter_kwargs(model_builder: Callable, kwargs: dict) -> dict:
@@ -89,119 +76,220 @@ nnch.constants.MODEL_BUILDERS.update(
 )
 
 
-@utils.log_context(logger, "training setup")
-def make_training_params(
-    training_lengths: Sequence[int],
-    training_range: int,
-    task_name: str,
-    model_name: str,
-    autoregressive: bool,
-    computation_steps_mult: int,
-    training_steps: int,
-    log_frequency: int,
-    batch_size: int,
-    learning_rate: int,
-    testing_range: int,
-    test_batch_size: int,
-    test_batches: int,
-    **kwargs,
-):
-    # Create the task.
-    curriculum = nnch.curriculum_lib.UniformCurriculum(training_lengths)
-    with utils.log_context(logger, f'"{task_name}" task build'):
-        task = cast(nnch.GeneralizationTask, nnch.constants.TASK_BUILDERS[task_name]())
+class NNCHPlugin:
+    @hookimpl
+    def argparse_before(self, parser: argparse.ArgumentParser):
+        # Experiment
+        task_names = nnch.constants.TASK_BUILDERS.keys()
+        parser.add_argument(
+            "--task-name",
+            type=str,
+            choices=task_names,
+            required=True,
+            help="name of tasks to execute",
+        )
+        parser.add_argument(
+            "--training-steps",
+            type=int,
+            default=100_000,
+            help="number of training steps",
+        )
+        parser.add_argument(
+            "-b",
+            "--batch-size",
+            type=int,
+            default=128,
+            help="number of samples in each training batch",
+        )
+        parser.add_argument(
+            "-lr", "--learning-rate", type=float, default=1e-3, help="learning rate"
+        )
+        parser.add_argument(
+            "--training-lengths",
+            type=int,
+            default=[],
+            nargs="+",
+            help="manual override of training lengths",
+        )
+        parser.add_argument(
+            "-N",
+            "--training-range",
+            type=int,
+            default=40,
+            help="maximum training sequence length (inclusive)",
+        )
+        parser.add_argument(
+            "--testing-lengths",
+            type=int,
+            nargs="*",
+            default=[],
+            help="manual override of testing lenghts",
+        )
+        parser.add_argument(
+            "-M",
+            "--testing-range",
+            type=int,
+            default=500,
+            help="maximum length of testing sequences",
+        )
+        parser.add_argument(
+            "--test-batch-size",
+            type=int,
+            default=64,
+            help="sub batch size for range evaluation",
+        )
+        parser.add_argument(
+            "--test-batches",
+            type=int,
+            default=8,
+            help="number of test batches to average over",
+        )
+        parser.add_argument(
+            "--autoregressive",
+            action="store_true",
+            help="use autoregressive sampling",
+        )
+        parser.add_argument(
+            "--computation-steps-mult",
+            type=int,
+            default=0,
+            help=(
+                "number of computation tokens to append (as multiple of input length)"
+            ),
+        )
 
-    # Create the model.
-    single_output = task.output_length(10) == 1
-    model_builder = nnch.constants.MODEL_BUILDERS[model_name]
-    with utils.log_context(logger, f'"{model_name}" model build'):
+        # Model
+        model_names = list(nnch.constants.MODEL_BUILDERS.keys())
+        parser.add_argument(
+            "--model-name",
+            type=str,
+            choices=model_names,
+            required=True,
+            help="model architecture",
+        )
+        parser.add_argument(
+            "--hidden-size",
+            type=int,
+            default=256,
+        )
+        parser.add_argument(
+            "--memory-cell-size",
+            type=int,
+            default=8,
+            help="dimension of vectors put in memory",
+        )
+        parser.add_argument(
+            "--memory-size",
+            type=int,
+            default=256,
+            help="size of tape (fixed along the episode)",
+        )
+        parser.add_argument(
+            "--stack-cell-size",
+            type=int,
+            default=8,
+            help="dimension of vectors put in the stack",
+        )
+        parser.add_argument(
+            "--stack-size",
+            type=int,
+            default=128,
+            help="total number of vectors that can be stacked",
+        )
+
+    @hookimpl(specname="run")
+    def run_train(self, config: dict):
+        # Create the task.
+        if not (training_lengths := config["training_lengths"]):
+            training_lengths = range(1, config["training_range"] + 1)
+        curriculum = nnch.curriculum_lib.UniformCurriculum(training_lengths)
+        task = cast(
+            nnch.GeneralizationTask, nnch.constants.TASK_BUILDERS[config["task_name"]]()
+        )
+
+        # Create the model.
+        single_output = task.output_length(10) == 1
+        model_builder = nnch.constants.MODEL_BUILDERS[config["model_name"]]
         model = model_builder(
             output_size=task.output_size,
             return_all_outputs=True,
-            **_filter_kwargs(model_builder, kwargs),
+            **_filter_kwargs(model_builder, config),
         )
-    if autoregressive:
-        if "transformer" not in model_name:
-            model = nnch.utils.make_model_with_targets_as_input(
-                model, computation_steps_mult
+        if config["autoregressive"]:
+            if "transformer" != config["model_name"]:
+                model = nnch.utils.make_model_with_targets_as_input(
+                    model, config["computation_steps_mult"]
+                )
+            model = nnch.utils.add_sampling_to_autoregressive_model(
+                model, single_output
             )
-        model = nnch.utils.add_sampling_to_autoregressive_model(model, single_output)
-    else:
-        model = nnch.utils.make_model_with_empty_targets(
-            model, task, computation_steps_mult, single_output
+        else:
+            model = nnch.utils.make_model_with_empty_targets(
+                model, task, config["computation_steps_mult"], single_output
+            )
+        model = hk.transform(model)
+
+        # Create the loss and accuracy based on the pointwise ones.
+        def loss_fn(output, target):
+            loss = jnp.mean(jnp.sum(task.pointwise_loss_fn(output, target), axis=-1))
+            return loss, {}
+
+        def accuracy_fn(output, target):
+            mask = task.accuracy_mask(target)
+            return jnp.sum(mask * task.accuracy_fn(output, target)) / jnp.sum(mask)
+
+        # Create the final training parameters.
+        training_params = nnch.training.ClassicTrainingParams(
+            seed=0,
+            model_init_seed=0,
+            training_steps=config["training_steps"],
+            log_frequency=0,  # Handled by plugins now
+            length_curriculum=curriculum,
+            batch_size=config["batch_size"],
+            task=task,
+            model=model,  # type: ignore
+            loss_fn=loss_fn,  # type: ignore
+            learning_rate=config["learning_rate"],
+            accuracy_fn=accuracy_fn,
+            compute_full_range_test=False,
+            max_range_test_length=config["testing_range"],
+            range_test_total_batch_size=config["test_batches"]
+            * config["test_batch_size"],
+            range_test_sub_batch_size=config["test_batch_size"],
+            is_autoregressive=config["autoregressive"],
         )
-    model = hk.transform(model)
-
-    # Create the loss and accuracy based on the pointwise ones.
-    def loss_fn(output, target):
-        loss = jnp.mean(jnp.sum(task.pointwise_loss_fn(output, target), axis=-1))
-        return loss, {}
-
-    def accuracy_fn(output, target):
-        mask = task.accuracy_mask(target)
-        return jnp.sum(mask * task.accuracy_fn(output, target)) / jnp.sum(mask)
-
-    # Create the final training parameters.
-    training_params = nnch.training.ClassicTrainingParams(
-        seed=0,
-        model_init_seed=0,
-        training_steps=training_steps,
-        log_frequency=log_frequency,
-        length_curriculum=curriculum,
-        batch_size=batch_size,
-        task=task,
-        model=model,  # type: ignore
-        loss_fn=loss_fn,  # type: ignore
-        learning_rate=learning_rate,
-        accuracy_fn=accuracy_fn,
-        compute_full_range_test=False,
-        max_range_test_length=testing_range,
-        range_test_total_batch_size=test_batches * test_batch_size,
-        range_test_sub_batch_size=test_batch_size,
-        is_autoregressive=autoregressive,
-    )
-    return training_params
-
-
-@utils.log_context(logger, "testing setup")
-def make_evaluation_params(run_config, training_params, params):
-    evaluation_params = nnch.range_evaluation.EvaluationParams(
-        model=training_params.model,
-        params=params,
-        accuracy_fn=training_params.accuracy_fn,
-        sample_batch=training_params.task.sample_batch,
-        max_test_length=run_config["testing_lengths"],
-        total_batch_size=training_params.range_test_total_batch_size,
-        sub_batch_size=training_params.range_test_sub_batch_size,
-        is_autoregressive=training_params.is_autoregressive,
-    )
-    setattr(evaluation_params, "testing_lengths", run_config["testing_lengths"])
-    setattr(evaluation_params, "hook", run_config["hook"])
-    return evaluation_params
-
-
-class NNCHPlugin:
-    @hookimpl
-    def run_setup(self, run_config: dict):
-        run_config["training_params"] = make_training_params(**run_config)
-
-    @hookimpl
-    def train(self, run_config: dict):
-        training_params = run_config["training_params"]
-        use_tqdm = "tqdm" in run_config["log_handlers"]
-        training_worker = nnch.training.TrainingWorker(
-            training_params, use_tqdm=use_tqdm
+        setattr(
+            training_params,
+            "compile_lengths",
+            random.sample(training_lengths, len(training_lengths)),
         )
+        setattr(training_params, "hook", config["hook"])
+
+        training_worker = nnch.training.TrainingWorker(training_params)
         with utils.log_context(logger, "training"):
-            training_results, _, params = training_worker.run()
+            *_, params = training_worker.run()
 
-        return {"training_params": training_params, "params": params}
+        return training_params, params
 
-    @hookimpl
-    def test(self, run_config, test_payload):
-        evaluation_params = make_evaluation_params(
-            run_config, test_payload["training_params"], test_payload["params"]
+    @hookimpl(wrapper=True, specname="run", trylast=True)
+    def run_test(self, config):
+        training_params, params = yield
+
+        evaluation_params = nnch.range_evaluation.EvaluationParams(
+            model=training_params.model,
+            params=params,
+            accuracy_fn=training_params.accuracy_fn,
+            sample_batch=training_params.task.sample_batch,
+            max_test_length=config["testing_range"],
+            total_batch_size=training_params.range_test_total_batch_size,
+            sub_batch_size=training_params.range_test_sub_batch_size,
+            is_autoregressive=training_params.is_autoregressive,
         )
+        if not (testing_lengths := config["testing_lengths"]):
+            testing_lengths = range(1, config["testing_range"] + 1)
+        setattr(evaluation_params, "testing_lengths", testing_lengths)
+        setattr(evaluation_params, "hook", config["hook"])
+
         with jax.disable_jit():
             with utils.log_context(logger, "range evaluation"):
                 evaluation_results = nnch.range_evaluation.range_evaluation(
@@ -214,3 +302,5 @@ class NNCHPlugin:
         )
         score = jnp.mean(accuracies)
         logger.info({"test/network_score": score})
+
+        return training_params, params

@@ -1,33 +1,34 @@
-from typing import Sequence
+import logging
+import json
 
 import pluggy
 
 import hooks
 import plugins
 
-_PM: pluggy.PluginManager | None = None
+logger = logging.getLogger("thesis." + __name__)
 
 
 def get_pm():
-    global _PM
-    if _PM is None:
-        pm = pluggy.PluginManager("mlworkflow")
+    pm = pluggy.PluginManager("mlworkflow")
 
-        pm.add_hookspecs(hooks.MLWorkflowSpec)
+    pm.add_hookspecs(hooks.MLWorkflowSpec)
 
-        pm.register(plugins.SympyPlugin())
-        pm.register(plugins.LoggingPlugin())
-        pm.register(plugins.SpeedPlugin())
-        pm.register(plugins.ConsistencyPlugin())
-        pm.register(plugins.FlaxIOPlugin())
-        pm.register(plugins.NNCHPlugin())
+    pm.register(plugins.SpeedPlugin())
+    pm.register(plugins.ConsistencyPlugin())
+    pm.register(
+        plugins.SympyPlugin(
+            (
+                ("training_lengths", "training_range"),
+                ("testing_lengths", "testing_range"),
+            )
+        )
+    )
+    pm.register(plugins.NNCHPlugin())
+    pm.register(plugins.FlaxLoadPlugin())
+    pm.register(plugins.FlaxSavePlugin())
+    pm.register(plugins.LoggingPlugin())
+    pm.register(plugins.SweepPlugin())
+    pm.register(plugins.TogglePlugin())
 
-        _PM = pm
-    return _PM
-
-
-def toggle_optional_plugins(enabled_plugins: Sequence[str]):
-    pm = get_pm()
-    for p in pm.get_plugins():
-        if hasattr(p, "name") and p.name not in enabled_plugins:
-            pm.unregister(p)
+    return pm

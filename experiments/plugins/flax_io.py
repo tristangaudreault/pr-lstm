@@ -1,64 +1,75 @@
 from pathlib import Path
 import logging
+import argparse
 
 from flax import serialization
 
 from hooks import hookimpl
 import utils
 
+
 logger = logging.getLogger("thesis." + __name__)
 
 
-class FlaxIOPlugin:
-    def expand_auto(self, path, run_config):
-        if path == Path("auto"):
-            return Path(
-                f"./saved/{run_config['task_name']}/{run_config['model_name']}.msgpack"
-            )
-        return path
+def preprocess_path(path, config):
+    if path == Path("auto"):
+        return Path(f"./saved/{config['task_name']}/{config['model_name']}.msgpack")
+    return path
 
-    def save(self, run_config, test_payload):
-        path = run_config["save_model"]
 
-        if path is None:
-            return
-
-        encoded_bytes = serialization.to_bytes(test_payload["params"])
-        with utils.log_context(logger, f'Saving model parameters to "{path}"'):
-            with open(path, "wb") as f:
-                f.write(encoded_bytes)
-
-    def load(self, run_config, test_payload):
-        path = run_config["load_model"]
-
-        if path is None:
-            return
-
-        with utils.log_context(logger, f'Loading model parameters from "{path}"'):
-            with open(path, "rb") as f:
-                encoded_bytes = f.read()
-
-            params = serialization.from_bytes(test_payload["params"], encoded_bytes)
-            test_payload["params"] = params
-
+class FlaxLoadPlugin:
     @hookimpl
-    def run_setup(self, run_config: dict):
-        load_path = run_config["load_model"]
-        if load_path:
-            logger.info("Load path provided. Overriding training step count to 0.")
-            run_config["training_params"].training_steps = 0
+    def argparse_before(self, parser: argparse.ArgumentParser):
+        parser.add_argument(
+            "--load-path",
+            type=Path,
+            help="Load path. Use 'auto' to generate the path './saved/{task-name}/{model-name}.msgpack'.",
+        )
 
-            run_config["load_model"] = self.expand_auto(load_path, run_config)
+    @hookimpl(wrapper=True)
+    def run(self, config: dict):
+        path = preprocess_path(config["load_path"], config)
 
-        save_path = run_config["save_model"]
-        if save_path:
-            save_path = self.expand_auto(run_config["save_model"], run_config)
+        if path:
+            config["training_params"].training_steps = 0
 
-            save_path.parent.mkdir(parents=True, exist_ok=True)
+        transient_data, save_data = yield
 
-            run_config["save_model"] = self.expand_auto(save_path, run_config)
+        if path:
+            with utils.log_context(
+                logger,
+                f'Loading model parameters from "{path}".',
+            ):
+                with open(path, "rb") as f:
+                    encoded_bytes = f.read()
 
+                save_data = serialization.from_bytes(save_data, encoded_bytes)
+
+        return transient_data, save_data
+
+
+class FlaxSavePlugin:
     @hookimpl
-    def test_setup(self, run_config: dict, test_payload: dict):
-        self.save(run_config, test_payload)
-        self.load(run_config, test_payload)
+    def argparse_before(self, parser: argparse.ArgumentParser):
+        parser.add_argument(
+            "--save-path",
+            type=Path,
+            help="Save path. Use 'auto' to generate the path './saved/{task-name}/{model-name}.msgpack'.",
+        )
+
+    @hookimpl(wrapper=True)
+    def run(self, config: dict):
+        path = preprocess_path(config["save_path"], config)
+
+        if path:
+            path.parent.mkdir(parents=True, exist_ok=True)
+
+        transient_data, save_data = yield
+
+        if path:
+            encoded_bytes = serialization.to_bytes(save_data)
+            with utils.log_context(logger, f'Saving model parameters to "{path}".'):
+                with open(path, "wb") as f:
+                    f.write(encoded_bytes)
+
+        return transient_data, save_data

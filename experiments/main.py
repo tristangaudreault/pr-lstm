@@ -1,40 +1,33 @@
 from dotenv import load_dotenv
 import logging
+import argparse
 
-import cli
 import plugin_manager
 
 load_dotenv(override=True)
 logger = logging.getLogger("thesis." + __name__)
 
 
-def main(config: dict):
+def main(args: dict | None = None):
     pm = plugin_manager.get_pm()
-    plugin_manager.toggle_optional_plugins(args["plugins"])
+
+    parser = argparse.ArgumentParser()
+    pm.hook.argparse_before(pm=pm, parser=parser)
+    if not args:
+        args = vars(parser.parse_args())
+    pm.hook.argparse_after(pm=pm, args=args)
+
     args["hook"] = pm.hook
 
-    pm.hook.sweep_setup(config=config)
+    sweeps = pm.hook.sweep(args=args)
+    if not sweeps:
+        sweeps = [[args]]
 
-    results = []
-    for task in config["task_name"]:
-        for model in config["model_name"]:
-            run_config = config.copy()
-            run_config["task_name"] = task
-            run_config["model_name"] = model
-
-            pm.hook.run_setup(run_config=run_config)
-            test_payload = pm.hook.train(run_config=run_config)
-            pm.hook.test_setup(run_config=run_config, test_payload=test_payload)
-            pm.hook.test(run_config=run_config, test_payload=test_payload)
-            pm.hook.run_teardown(run_config=run_config)
-
-    pm.hook.sweep_teardown(config=config)
-
-    return results
+    for sweep in sweeps:
+        for config in sweep:
+            pm.hook.run_before(config=config)
+            pm.hook.run(config=config)
 
 
 if __name__ == "__main__":
-    parser = cli.get_parser()
-    args = vars(parser.parse_args())
-
-    main(args)
+    main()

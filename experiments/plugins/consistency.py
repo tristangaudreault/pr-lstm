@@ -9,13 +9,10 @@ logger = logging.getLogger("thesis." + __name__)
 
 
 class ConsistencyPlugin:
-    name = "consistency"
-
-    def __init__(self):
-        self.data = []
+    toggle_name = "consistency"
 
     @hookimpl
-    def test_length_end(self, log_data: dict, outputs, batch, apply_fn, params):
+    def test_log(self, log_data: dict, outputs, batch, apply_fn, params):
         length = log_data["test/length"]
         if outputs.ndim == 3:
             outputs = outputs[:, -1, :]
@@ -25,14 +22,20 @@ class ConsistencyPlugin:
         )
         self.data.append(outputs)
 
-    @hookimpl
-    def run_teardown(self, run_config):
+    @hookimpl(wrapper=True)
+    def run(self, config):
+        self.data = []
+
+        results = yield
+
         X = np.concatenate(self.data, axis=0)
 
-        path = Path(f"saved/{self.name}/{run_config["task_name"]}.csv")
+        path = Path(
+            f"saved/{self.toggle_name}/{config["task_name"]}_{config["model_name"]}.csv"
+        )
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w") as f:
             f.write("x,y,c\n")
             np.savetxt(f, X, delimiter=",", fmt="%.2f")
 
-        self.__init__()
+        return results

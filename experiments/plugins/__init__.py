@@ -1,6 +1,8 @@
 from .consistency import ConsistencyPlugin
+from .flax_io import FlaxLoadPlugin, FlaxSavePlugin
 from .logging import LoggingPlugin
-from .speed import SpeedPlugin
-from .sympy import SympyPlugin
 from .nnch import NNCHPlugin
-from .flax_io import FlaxIOPlugin
+from .speed import SpeedPlugin
+from .sweep import SweepPlugin
+from .sympy import SympyPlugin
+from .toggle import TogglePlugin
