@@ -15,7 +15,7 @@ class SympyPlugin:
         self._keys = keys
 
     @hookimpl
-    def argparse_before(self, parser: argparse.ArgumentParser):
+    def add_cli_args(self, parser: argparse.ArgumentParser):
         for expr_key, range_key in self._keys:
             for action in parser._actions:
                 if action.dest == expr_key:
@@ -29,7 +29,7 @@ class SympyPlugin:
                         )
 
     @hookimpl
-    def run_before(self, config: dict):
+    def run_start(self, config: dict):
         n = sp.symbols("n")
         for expr_key, range_key in self._keys:
             f = sp.lambdify(n, config[expr_key])

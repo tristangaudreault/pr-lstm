@@ -14,7 +14,7 @@ class SweepPlugin:
     """Performs a grid sweep on argparse arguments with the default `nargs=None`."""
 
     @hookimpl(trylast=True)
-    def argparse_before(self, parser: argparse.ArgumentParser):
+    def add_cli_args(self, parser: argparse.ArgumentParser):
         """Finds all arguments with `nargs=None`."""
         self._keys = []
         for action in parser._actions:
@@ -25,7 +25,7 @@ class SweepPlugin:
                     action.default = [action.default]
 
     @hookimpl
-    def sweep(self, args: dict) -> Iterable[dict]:
+    def generate_runs(self, args: dict) -> Iterable[dict]:
         """Generates grid sweep configurations based on identified keys."""
         keys = [k for k in self._keys if isinstance(args[k], list)]
         values = [args[k] for k in keys]
@@ -41,7 +41,7 @@ class SweepPlugin:
             yield config
 
     @hookimpl(trylast=True)
-    def run_before(self, config: dict):
+    def run_start(self, config: dict):
         """Log the sweep progress."""
         logger.info(
             "Sweep %d/%d: %s",

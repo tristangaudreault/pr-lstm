@@ -1,79 +1,117 @@
-from typing import Any
 import logging
 
 import jax
 import jax.numpy as jnp
-import jax.nn as jnn
 import haiku as hk
 
-from . import utils
 
 logger = logging.getLogger(__name__)
 
 
-class CRNN(hk.Module):
+class SCM(hk.Module):
+    INNER_CELLS = {"gru": hk.GRU, "rnn": hk.VanillaRNN}
+
     def __init__(
         self,
         hidden_size: int,
+        inner_cell: str,
         batch_first: bool = True,
         use_h0: bool = False,
         name: str | None = None,
     ):
         super().__init__(name=name)
         self.hidden_size = hidden_size
+        self.inner_cell = self.INNER_CELLS[inner_cell.lower()]
         self.batch_axis = int(not batch_first)
         self.time_axis = int(batch_first)
         self.use_h0 = use_h0
 
     def __call__(self, xs: jax.Array) -> jax.Array:
-        batch_size = xs.shape[self.batch_axis]
-
-        cell = self.get_cell()
-        h0 = cell.initial_state(batch_size)
-
-        gs = self.intermediate_map(xs, h0)
-        ys = self.scan(cell, gs)
-
-        return ys
-
-    def get_cell(self, name: str | None = None) -> hk.RNNCore:
-        return hk.GRU(self.hidden_size, name=name)
-
-    def intermediate_map(self, xs: jax.Array, h0: Any) -> Any:
-        def leaf_map(idx: int, leaf: jax.Array):
-            name = "FC_" + str(idx)
-            mapped = hk.Linear(leaf.shape[-1], name=name)(xs)
-
-            if self.use_h0:
-                mapped = jnp.concatenate(
-                    (
-                        leaf[:, None, :],
-                        mapped,
-                    ),
-                    axis=self.time_axis,
-                )
-
-            return mapped
-
-        return utils.map_with_index(leaf_map, h0)
-
-    def scan(self, cell: hk.RNNCore, gs: Any, reverse: bool = False):
-        cell_vmap = jax.vmap(cell, in_axes=self.time_axis, out_axes=self.time_axis)
-
-        def operator(a, b):
-            a_concat = jnp.concatenate(jax.tree_util.tree_leaves(a), axis=-1)
-            _, h = cell_vmap(a_concat, b)
-            return h
-
-        hs = jax.lax.associative_scan(
-            operator,
-            gs,
-            reverse=reverse,
+        return self.scan(
+            self.get_op(),
+            self.get_elems(xs),
             axis=self.time_axis,
         )
-        ys = jax.tree.leaves(hs)[0]
 
-        if self.use_h0:
-            ys = ys[:, 1:, :]
+    def get_cell(self, name: str | None = None) -> hk.RNNCore:
+        cell = self.inner_cell(self.hidden_size, name=name)
+        cell_vmap = jax.vmap(cell, in_axes=self.time_axis, out_axes=self.time_axis)
+        return cell_vmap
 
-        return ys
+    def get_op(self):
+        cell = self.get_cell("cell")
+
+        def op(a, b):
+            return cell(a, b)[0]
+
+        return op
+
+    def get_elems(self, xs):
+        return hk.Linear(self.hidden_size)(xs)
+
+    def scan(self, op, elems, axis):
+        return jax.lax.associative_scan(op, elems, axis=axis)
+
+
+class LSCM(SCM):
+    def __init__(
+        self,
+        hidden_size: int,
+        inner_cell: str,
+        batch_first: bool = True,
+        use_h0: bool = False,
+        name: str | None = None,
+    ):
+        super().__init__(hidden_size, inner_cell, batch_first, use_h0, name)
+        self.inner_cell = hk.LSTM
+
+    def get_elems(self, xs):
+        hidden = hk.Linear(self.hidden_size)(xs)
+        cell = hk.Linear(self.hidden_size)(xs)  # jnp.zeros_like(hidden)
+        return hk.LSTMState(hidden, cell)
+
+    def get_op(self):
+        # cell = self.get_cell("cell")
+
+        # def op(a: hk.LSTMState, b: hk.LSTMState):
+        #     return cell(b.hidden, hk.LSTMState(a.hidden, a.cell + b.cell))[1]
+
+        linear = hk.Linear(5 * self.hidden_size)
+
+        def op(a: hk.LSTMState, b: hk.LSTMState):
+            hh = jnp.concatenate([a.hidden, b.hidden], axis=-1)
+            gated = linear(hh)
+            i, g, f_a, f_b, o = jnp.split(gated, indices_or_sections=5, axis=-1)
+            f_a = jax.nn.sigmoid(f_a + 1)  # Forget bias, as in sonnet.
+            f_b = jax.nn.sigmoid(f_b + 1)  # Forget bias, as in sonnet.
+            c = f_a * a.cell + f_b * b.cell + jax.nn.sigmoid(i) * jnp.tanh(g)
+            h = jax.nn.sigmoid(o) * jnp.tanh(c)
+            return hk.LSTMState(h, c)
+
+        return op
+
+    def scan(self, op, elems, axis):
+        return super().scan(op, elems, axis).hidden
+
+
+class ASCM(SCM):
+    def get_op(self):
+        gg = self.get_cell("gg")
+        pg = self.get_cell("pg")
+        pp = self.get_cell("pp")
+
+        def op(a, b):
+            g_a, p_a = a
+            g_b, p_b = b
+            return gg(g_a, pg(p_a, g_b)[1])[1], pp(p_a, p_b)[1]
+
+        return op
+
+    def get_elems(self, xs):
+        gs = hk.Linear(self.hidden_size)(xs)
+        ps = hk.Linear(self.hidden_size)(xs)
+        return (gs, ps)
+
+    def scan(self, op, elems, axis):
+        gs, ps = jax.lax.associative_scan(op, elems, axis=axis)
+        return gs

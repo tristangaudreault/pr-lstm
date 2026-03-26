@@ -23,10 +23,10 @@ class ConsistencyPlugin:
         self.data.append(outputs)
 
     @hookimpl(wrapper=True)
-    def run(self, config):
+    def test(self, config):
         self.data = []
 
-        results = yield
+        yield
 
         X = np.concatenate(self.data, axis=0)
 
@@ -37,5 +37,3 @@ class ConsistencyPlugin:
         with open(path, "w") as f:
             f.write("x,y,c\n")
             np.savetxt(f, X, delimiter=",", fmt="%.2f")
-
-        return results

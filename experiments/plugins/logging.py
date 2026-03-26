@@ -17,7 +17,7 @@ def round_metrics(metrics: dict[str, float]):
 
 class LoggingPlugin:
     @hookimpl
-    def argparse_before(self, parser: argparse.ArgumentParser):
+    def add_cli_args(self, parser: argparse.ArgumentParser):
         parser.add_argument(
             "--log-level",
             type=str.upper,
@@ -44,7 +44,7 @@ class LoggingPlugin:
         )
 
     @hookimpl
-    def argparse_after(self, args: dict):
+    def handle_cli_args(self, args: dict):
         logging.basicConfig(filename=args["log_file"], level=logging.WARNING)
         logging.getLogger("thesis").setLevel(
             getattr(logging, args["log_level"], logging.WARNING)

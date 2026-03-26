@@ -7,6 +7,8 @@ from typing import cast
 import logging
 import random
 import argparse
+from pathlib import Path
+from flax import serialization
 
 import haiku as hk
 import jax
@@ -49,7 +51,7 @@ def _filter_kwargs(model_builder: Callable, kwargs: dict) -> dict:
 
 def _make_model(
     output_size: int,
-    inner_core: type[thesis.model.CRNN],
+    inner_core: type[thesis.model.SCM],
     return_all_outputs: bool = False,
     input_window: int = 1,
     **model_kwargs: Any,
@@ -71,14 +73,22 @@ def _make_model(
 nnch.constants.MODEL_BUILDERS.update(
     {
         "gru": partial(nnch.rnn.make_rnn, rnn_core=hk.GRU),
-        "crnn": partial(_make_model, inner_core=thesis.model.CRNN),
+        "scm": partial(_make_model, inner_core=thesis.model.SCM),
+        "lscm": partial(_make_model, inner_core=thesis.model.LSCM),
+        "ascm": partial(_make_model, inner_core=thesis.model.ASCM),
     }
 )
 
 
+def preprocess_path(path, config):
+    if path == Path("auto"):
+        return Path(f"./saved/{config['task_name']}/{config['model_name']}.msgpack")
+    return path
+
+
 class NNCHPlugin:
     @hookimpl
-    def argparse_before(self, parser: argparse.ArgumentParser):
+    def add_cli_args(self, parser: argparse.ArgumentParser):
         # Experiment
         task_names = nnch.constants.TASK_BUILDERS.keys()
         parser.add_argument(
@@ -196,9 +206,38 @@ class NNCHPlugin:
             default=128,
             help="total number of vectors that can be stacked",
         )
+        parser.add_argument(
+            "--load-model",
+            type=Path,
+            help="Load path. Use 'auto' to generate the path './saved/{task-name}/{model-name}.msgpack'.",
+        )
+        parser.add_argument(
+            "--save-model",
+            type=Path,
+            help="Save path. Use 'auto' to generate the path './saved/{task-name}/{model-name}.msgpack'.",
+        )
+        parser.add_argument(
+            "--inner-cell",
+            type=str,
+            choices=list(thesis.model.SCM.INNER_CELLS.keys()),
+            default="gru",
+            help="Inner cell architecture for circuited models.",
+        )
 
-    @hookimpl(specname="run")
-    def run_train(self, config: dict):
+    @hookimpl
+    def run(self, pm, config):
+        training_params, params = self.train(config)
+        self.test(config, training_params, params)
+
+    def train(self, config: dict):
+        if config["load_model"]:
+            config["load_model"] = preprocess_path(config["load_model"], config)
+            config["training_steps"] = 0
+            config["training_range"] = 1
+        if config["save_model"]:
+            config["save_model"] = preprocess_path(config["save_model"], config)
+            config["save_model"].parent.mkdir(parents=True, exist_ok=True)
+
         # Create the task.
         if not (training_lengths := config["training_lengths"]):
             training_lengths = range(1, config["training_range"] + 1)
@@ -269,12 +308,32 @@ class NNCHPlugin:
         with utils.log_context(logger, "training"):
             *_, params = training_worker.run()
 
+        logger.info(
+            "Total params: %s",
+            format(sum(p.size for p in jax.tree.leaves(params)), ",d"),
+        )
+
+        if config["save_model"]:
+            encoded_bytes = serialization.to_bytes(params)
+            with utils.log_context(
+                logger, f'Saving model parameters to "{config["save_model"]}".'
+            ):
+                with open(config["save_model"], "wb") as f:
+                    f.write(encoded_bytes)
+
+        if config["load_model"]:
+            with utils.log_context(
+                logger,
+                f'Loading model parameters from "{config["load_model"]}".',
+            ):
+                with open(config["load_model"], "rb") as f:
+                    encoded_bytes = f.read()
+
+                params = serialization.from_bytes(params, encoded_bytes)
+
         return training_params, params
 
-    @hookimpl(wrapper=True, specname="run", trylast=True)
-    def run_test(self, config):
-        training_params, params = yield
-
+    def test(self, config, training_params, params):
         evaluation_params = nnch.range_evaluation.EvaluationParams(
             model=training_params.model,
             params=params,
@@ -301,6 +360,4 @@ class NNCHPlugin:
             [log_data["test/accuracy"] for log_data in evaluation_results]
         )
         score = jnp.mean(accuracies)
-        logger.info({"test/network_score": score})
-
-        return training_params, params
+        logger.info({"test/network_score": round(score, 1)})

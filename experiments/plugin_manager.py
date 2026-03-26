@@ -14,6 +14,7 @@ def get_pm():
 
     pm.add_hookspecs(hooks.MLWorkflowSpec)
 
+    pm.register(plugins.TexPlugin())
     pm.register(plugins.SpeedPlugin())
     pm.register(plugins.ConsistencyPlugin())
     pm.register(
@@ -25,8 +26,6 @@ def get_pm():
         )
     )
     pm.register(plugins.NNCHPlugin())
-    pm.register(plugins.FlaxLoadPlugin())
-    pm.register(plugins.FlaxSavePlugin())
     pm.register(plugins.LoggingPlugin())
     pm.register(plugins.SweepPlugin())
     pm.register(plugins.TogglePlugin())
