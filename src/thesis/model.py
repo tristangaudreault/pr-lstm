@@ -1,7 +1,9 @@
 import logging
+from typing import Callable
 
 import jax
 import jax.numpy as jnp
+import jax.nn as jnn
 import haiku as hk
 
 
@@ -15,16 +17,16 @@ class SCM(hk.Module):
         self,
         hidden_size: int,
         inner_cell: str,
+        substeps: int = 0,
         batch_first: bool = True,
-        use_h0: bool = False,
         name: str | None = None,
     ):
         super().__init__(name=name)
         self.hidden_size = hidden_size
         self.inner_cell = self.INNER_CELLS[inner_cell.lower()]
+        self.substeps = substeps
         self.batch_axis = int(not batch_first)
         self.time_axis = int(batch_first)
-        self.use_h0 = use_h0
 
     def __call__(self, xs: jax.Array) -> jax.Array:
         return self.scan(
@@ -41,8 +43,8 @@ class SCM(hk.Module):
     def get_op(self):
         cell = self.get_cell("cell")
 
-        def op(a, b):
-            return cell(a, b)[0]
+        def op(l, r):
+            return cell(r, l)[1]
 
         return op
 
@@ -54,64 +56,40 @@ class SCM(hk.Module):
 
 
 class LSCM(SCM):
-    def __init__(
-        self,
-        hidden_size: int,
-        inner_cell: str,
-        batch_first: bool = True,
-        use_h0: bool = False,
-        name: str | None = None,
-    ):
-        super().__init__(hidden_size, inner_cell, batch_first, use_h0, name)
-        self.inner_cell = hk.LSTM
-
     def get_elems(self, xs):
-        hidden = hk.Linear(self.hidden_size)(xs)
-        cell = hk.Linear(self.hidden_size)(xs)  # jnp.zeros_like(hidden)
-        return hk.LSTMState(hidden, cell)
+        gates = hk.Linear(3 * self.hidden_size)(xs)
+        i, g, o = jnp.split(gates, indices_or_sections=3, axis=-1)
+        c = jnn.sigmoid(i) * jnp.tanh(g)
+        h = jax.nn.sigmoid(o) * jnp.tanh(c)
 
-    def get_op(self):
-        # cell = self.get_cell("cell")
+        return hk.LSTMState(h, c)
 
-        # def op(a: hk.LSTMState, b: hk.LSTMState):
-        #     return cell(b.hidden, hk.LSTMState(a.hidden, a.cell + b.cell))[1]
-
+    def get_cell(
+        self, name: str | None = None
+    ) -> Callable[[hk.LSTMState, hk.LSTMState], tuple[jax.Array, hk.LSTMState]]:
         linear = hk.Linear(5 * self.hidden_size)
+        linear_2 = hk.Linear(4 * self.hidden_size)
 
-        def op(a: hk.LSTMState, b: hk.LSTMState):
-            hh = jnp.concatenate([a.hidden, b.hidden], axis=-1)
-            gated = linear(hh)
-            i, g, f_a, f_b, o = jnp.split(gated, indices_or_sections=5, axis=-1)
-            f_a = jax.nn.sigmoid(f_a + 1)  # Forget bias, as in sonnet.
-            f_b = jax.nn.sigmoid(f_b + 1)  # Forget bias, as in sonnet.
-            c = f_a * a.cell + f_b * b.cell + jax.nn.sigmoid(i) * jnp.tanh(g)
+        def cell(l: hk.LSTMState, r: hk.LSTMState) -> tuple[jax.Array, hk.LSTMState]:
+            gates = linear(jnp.concatenate([l.hidden, r.hidden], axis=-1))
+            i, g, f_l, f_r, o = jnp.split(gates, indices_or_sections=5, axis=-1)
+            f_l = jax.nn.sigmoid(f_l)  # Forget bias, as in sonnet.
+            f_r = jax.nn.sigmoid(f_r)  # Forget bias, as in sonnet.
+            c = f_l * l.cell + f_r * r.cell + jax.nn.sigmoid(i) * jnp.tanh(g)
             h = jax.nn.sigmoid(o) * jnp.tanh(c)
-            return hk.LSTMState(h, c)
+            new_state = hk.LSTMState(h, c)
 
-        return op
+            for substep in range(self.substeps):
+                gates = linear_2(new_state.hidden)
+                i, g, f, o = jnp.split(gates, indices_or_sections=4, axis=-1)
+                f = jax.nn.sigmoid(f)
+                c = f * new_state.cell + jax.nn.sigmoid(i) * jnp.tanh(g)
+                h = jax.nn.sigmoid(o) * jnp.tanh(c)
+                new_state = hk.LSTMState(h, c)
+
+            return h, new_state
+
+        return cell
 
     def scan(self, op, elems, axis):
         return super().scan(op, elems, axis).hidden
-
-
-class ASCM(SCM):
-    def get_op(self):
-        gg = self.get_cell("gg")
-        pg = self.get_cell("pg")
-        pp = self.get_cell("pp")
-
-        def op(a, b):
-            g_a, p_a = a
-            g_b, p_b = b
-            return gg(g_a, pg(p_a, g_b)[1])[1], pp(p_a, p_b)[1]
-
-        return op
-
-    def get_elems(self, xs):
-        gs = hk.Linear(self.hidden_size)(xs)
-        ps = hk.Linear(self.hidden_size)(xs)
-        return (gs, ps)
-
-    def scan(self, op, elems, axis):
-        gs, ps = jax.lax.associative_scan(op, elems, axis=axis)
-        return gs

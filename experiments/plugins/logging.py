@@ -12,7 +12,7 @@ logger = logging.getLogger("thesis." + __name__)
 
 
 def round_metrics(metrics: dict[str, float]):
-    return {k: round(v, 2) for k, v in metrics.items()}
+    return {k: round(v, 4) for k, v in metrics.items()}
 
 
 class LoggingPlugin:

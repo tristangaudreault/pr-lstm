@@ -75,7 +75,6 @@ nnch.constants.MODEL_BUILDERS.update(
         "gru": partial(nnch.rnn.make_rnn, rnn_core=hk.GRU),
         "scm": partial(_make_model, inner_core=thesis.model.SCM),
         "lscm": partial(_make_model, inner_core=thesis.model.LSCM),
-        "ascm": partial(_make_model, inner_core=thesis.model.ASCM),
     }
 )
 
@@ -223,6 +222,12 @@ class NNCHPlugin:
             default="gru",
             help="Inner cell architecture for circuited models.",
         )
+        parser.add_argument(
+            "--substeps",
+            type=int,
+            default=0,
+            help="Substeps in SCM architecture.",
+        )
 
     @hookimpl
     def run(self, pm, config):
@@ -360,4 +365,4 @@ class NNCHPlugin:
             [log_data["test/accuracy"] for log_data in evaluation_results]
         )
         score = jnp.mean(accuracies)
-        logger.info({"test/network_score": round(score, 1)})
+        logger.info({"test/network_score": round(score, 3)})

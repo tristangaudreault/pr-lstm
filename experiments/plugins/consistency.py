@@ -23,13 +23,12 @@ class ConsistencyPlugin:
         self.data.append(outputs)
 
     @hookimpl(wrapper=True)
-    def test(self, config):
+    def run(self, config):
         self.data = []
 
         yield
 
         X = np.concatenate(self.data, axis=0)
-
         path = Path(
             f"saved/{self.toggle_name}/{config["task_name"]}_{config["model_name"]}.csv"
         )
