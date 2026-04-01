@@ -67,27 +67,24 @@ class LSCM(SCM):
     def get_cell(
         self, name: str | None = None
     ) -> Callable[[hk.LSTMState, hk.LSTMState], tuple[jax.Array, hk.LSTMState]]:
-        linear = hk.Linear(5 * self.hidden_size)
-        linear_2 = hk.Linear(4 * self.hidden_size)
+        binary_linear = hk.Linear(5 * self.hidden_size)
+        unary_linear = hk.Linear(4 * self.hidden_size)
 
         def cell(l: hk.LSTMState, r: hk.LSTMState) -> tuple[jax.Array, hk.LSTMState]:
-            gates = linear(jnp.concatenate([l.hidden, r.hidden], axis=-1))
+            gates = binary_linear(jnp.concatenate([l.hidden, r.hidden], axis=-1))
             i, g, f_l, f_r, o = jnp.split(gates, indices_or_sections=5, axis=-1)
-            f_l = jax.nn.sigmoid(f_l)  # Forget bias, as in sonnet.
-            f_r = jax.nn.sigmoid(f_r)  # Forget bias, as in sonnet.
+            f_l = jax.nn.sigmoid(f_l)
+            f_r = jax.nn.sigmoid(f_r)
             c = f_l * l.cell + f_r * r.cell + jax.nn.sigmoid(i) * jnp.tanh(g)
+            h = jnn.sigmoid(o) * jnn.tanh(c)
+
+            gates = unary_linear(h)
+            i, g, f, o = jnp.split(gates, indices_or_sections=4, axis=-1)
+            f = jax.nn.sigmoid(f)
+            c = f * c + jax.nn.sigmoid(i) * jnp.tanh(g)
             h = jax.nn.sigmoid(o) * jnp.tanh(c)
-            new_state = hk.LSTMState(h, c)
 
-            for substep in range(self.substeps):
-                gates = linear_2(new_state.hidden)
-                i, g, f, o = jnp.split(gates, indices_or_sections=4, axis=-1)
-                f = jax.nn.sigmoid(f)
-                c = f * new_state.cell + jax.nn.sigmoid(i) * jnp.tanh(g)
-                h = jax.nn.sigmoid(o) * jnp.tanh(c)
-                new_state = hk.LSTMState(h, c)
-
-            return h, new_state
+            return h, hk.LSTMState(h, c)
 
         return cell
 
