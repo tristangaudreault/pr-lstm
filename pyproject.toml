@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "thesis"
-version = "0.0.1"
+version = "0.2.0"
 dependencies = [
   "dm-haiku",
   "jax[cuda12] ; sys_platform == 'linux'",
@@ -19,6 +19,8 @@ dependencies = [
   "tqdm",
   "typing-extensions",
   "flax",
+  "pluggy",
+  "sympy",
 ]
 authors = [
   { name = "Tristan Gaudreault", email = "tristan@tristangaudreault.com" },
