@@ -3,6 +3,7 @@ from contextlib import ContextDecorator
 import time
 import logging
 
+import pandas as pd
 
 logger = logging.getLogger("thesis." + __name__)
 
@@ -29,3 +30,9 @@ def tex_plot(data: Iterable[tuple[float, float]]):
 
 def tex_tablerow(data: Iterable[tuple[float, float]]):
     return " & ".join([f"${y:.2f}$" for x, y in data])
+
+
+def save_dat(config: dict, data: dict[str, list]):
+    pd.DataFrame(data).to_csv(
+        f"{config["task_name"]}_{config["model_name"]}.dat", sep=" ", index=False
+    )

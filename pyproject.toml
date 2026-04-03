@@ -21,6 +21,7 @@ dependencies = [
   "flax",
   "pluggy",
   "sympy",
+  "chex",
 ]
 authors = [
   { name = "Tristan Gaudreault", email = "tristan@tristangaudreault.com" },
@@ -38,3 +39,6 @@ license-files = ["LICEN[CS]E*"]
 [project.urls]
 Homepage = "https://github.com/tristangaudreault/thesis"
 Issues = "https://github.com/tristangaudreault/thesis/issues"
+
+[tool.hatch.metadata]
+allow-direct-references = true

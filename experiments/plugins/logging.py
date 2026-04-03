@@ -4,9 +4,12 @@ import time
 from collections import defaultdict
 import argparse
 from pathlib import Path
+import os
 
 from hooks import hookimpl
 import utils
+
+import pandas as pd
 
 logger = logging.getLogger("thesis." + __name__)
 
@@ -42,6 +45,13 @@ class LoggingPlugin:
             default=None,
             help="path to log file",
         )
+        parser.add_argument(
+            "--save-dir",
+            type=Path,
+            nargs="?",
+            default=Path("saved"),
+            help="path to save directory",
+        )
 
     @hookimpl
     def handle_cli_args(self, args: dict):
@@ -50,27 +60,27 @@ class LoggingPlugin:
             getattr(logging, args["log_level"], logging.WARNING)
         )
 
+        args["save_dir"].mkdir(exist_ok=True)
+
     @hookimpl(wrapper=True)
     def run(self, config: dict):
         self._count = 0
         self._total_metrics = defaultdict(float)
-        self._history: dict[str, list[float]] = defaultdict(list)
+        self.data: dict[str, list[float]] = defaultdict(list)
         self._start_time = None
         self._log_frequency = config["log_frequency"]
         self._training_steps = config["training_steps"]
 
-        results = yield
+        yield
 
-        logger.info(
-            "loss/step plot: %s",
-            utils.tex_plot(zip(self._history["step"], self._history["loss"])),
+        pd.DataFrame(self.data).to_csv(
+            config["save_dir"]
+            / Path(
+                f"{config["task_name"]}-{config["model_name"]}-training.dat"
+            ),
+            sep=" ",
+            index=False,
         )
-        logger.info(
-            "loss/time plot: %s",
-            utils.tex_plot(zip(self._history["time"], self._history["loss"])),
-        )
-
-        return results
 
     @hookimpl
     def compiled(self):
@@ -88,7 +98,7 @@ class LoggingPlugin:
             for k, v in self._total_metrics.items():
                 avg = v / self._count
                 log_data[k] = avg
-                self._history[k].append(avg)
+                self.data[k].append(avg)
 
             logger.info(
                 "%s %d/%d",
@@ -97,10 +107,10 @@ class LoggingPlugin:
                 self._training_steps,
             )
 
-            self._history["time"].append(
+            self.data["time"].append(
                 time.time() - self._start_time if self._start_time else 0.0
             )
-            self._history["step"].append(step)
+            self.data["step"].append(step)
 
             self._count = 0
             self._total_metrics = defaultdict(float)

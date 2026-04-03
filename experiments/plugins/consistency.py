@@ -1,7 +1,8 @@
 import logging
 from pathlib import Path
 
-import numpy as np
+import jax.numpy as jnp
+import pandas as pd
 
 from hooks import hookimpl
 
@@ -17,7 +18,7 @@ class ConsistencyPlugin:
         if outputs.ndim == 3:
             outputs = outputs[:, -1, :]
         outputs = outputs[:, :2]
-        outputs = np.pad(
+        outputs = jnp.pad(
             outputs, ((0, 0), (0, 1)), mode="constant", constant_values=length
         )
         self.data.append(outputs)
@@ -28,11 +29,12 @@ class ConsistencyPlugin:
 
         yield
 
-        X = np.concatenate(self.data, axis=0)
-        path = Path(
-            f"saved/{self.toggle_name}/{config["task_name"]}_{config["model_name"]}.csv"
+        X = jnp.concatenate(self.data, axis=0)
+        pd.DataFrame(X, columns=["x", "y", "c"]).to_csv(
+            config["save_dir"]
+            / Path(
+                f"{config["task_name"]}-{config["model_name"]}-viz.dat"
+            ),
+            sep=" ",
+            index=False,
         )
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w") as f:
-            f.write("x,y,c\n")
-            np.savetxt(f, X, delimiter=",", fmt="%.2f")
