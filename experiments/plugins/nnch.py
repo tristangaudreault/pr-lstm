@@ -81,7 +81,7 @@ nnch.constants.MODEL_BUILDERS.update(
 
 def preprocess_path(path, config):
     if path == Path("auto"):
-        return Path(f"./saved/{config['task_name']}/{config['model_name']}.msgpack")
+        return Path(f"{config["save_dir"]}/{config['task_name']}-{config['model_name']}.msgpack")
     return path
 
 
