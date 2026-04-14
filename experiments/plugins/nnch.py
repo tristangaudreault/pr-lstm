@@ -51,7 +51,7 @@ def _filter_kwargs(model_builder: Callable, kwargs: dict) -> dict:
 
 def _make_model(
     output_size: int,
-    inner_core: type[thesis.model.SCM],
+    inner_core: type[thesis.model.NTR],
     return_all_outputs: bool = False,
     input_window: int = 1,
     **model_kwargs: Any,
@@ -73,15 +73,16 @@ def _make_model(
 nnch.constants.MODEL_BUILDERS.update(
     {
         "gru": partial(nnch.rnn.make_rnn, rnn_core=hk.GRU),
-        "scm": partial(_make_model, inner_core=thesis.model.SCM),
-        "lscm": partial(_make_model, inner_core=thesis.model.LSCM),
+        "ntr": partial(_make_model, inner_core=thesis.model.NTR),
     }
 )
 
 
 def preprocess_path(path, config):
     if path == Path("auto"):
-        return Path(f"{config["save_dir"]}/{config['task_name']}-{config['model_name']}.msgpack")
+        return Path(
+            f"{config["save_dir"]}/{config['task_name']}-{config['model_name']}.msgpack"
+        )
     return path
 
 
@@ -216,17 +217,17 @@ class NNCHPlugin:
             help="Save path. Use 'auto' to generate the path './saved/{task-name}/{model-name}.msgpack'.",
         )
         parser.add_argument(
-            "--inner-cell",
+            "--cell-name",
             type=str,
-            choices=list(thesis.model.SCM.INNER_CELLS.keys()),
-            default="gru",
+            choices=list(thesis.model.NTR.CELL_MAP.keys()),
+            default="lstm",
             help="Inner cell architecture for circuited models.",
         )
         parser.add_argument(
-            "--substeps",
+            "--num-layers",
             type=int,
-            default=0,
-            help="Substeps in SCM architecture.",
+            default=2,
+            help="Number of layers in NTR encoder.",
         )
 
     @hookimpl

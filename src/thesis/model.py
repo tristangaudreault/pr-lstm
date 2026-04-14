@@ -6,87 +6,80 @@ import jax.numpy as jnp
 import jax.nn as jnn
 import haiku as hk
 
+from .nary_cells import NaryLSTM, NaryRNN
+
 
 logger = logging.getLogger(__name__)
 
 
-class SCM(hk.Module):
-    INNER_CELLS = {"gru": hk.GRU, "rnn": hk.VanillaRNN}
+class NTR(hk.Module):
+    CELL_MAP = {
+        "gru": hk.GRU,
+        "rnn": NaryRNN,
+        "lstm": NaryLSTM,
+    }
 
     def __init__(
         self,
         hidden_size: int,
-        inner_cell: str,
-        substeps: int = 0,
+        cell_name: str,
         batch_first: bool = True,
+        num_layers: int = 2,
         name: str | None = None,
     ):
         super().__init__(name=name)
         self.hidden_size = hidden_size
-        self.inner_cell = self.INNER_CELLS[inner_cell.lower()]
-        self.substeps = substeps
+        self.cell_class = self.CELL_MAP[cell_name.lower()]
         self.batch_axis = int(not batch_first)
         self.time_axis = int(batch_first)
+        assert num_layers >= 1
+        assert not (
+            num_layers > 1 and self.cell_class is hk.GRU
+        ), "GRU cell does not support multi-layer approaches."
+        self.num_layers = num_layers
 
     def __call__(self, xs: jax.Array) -> jax.Array:
         return self.scan(
-            self.get_op(),
+            self.get_cell(),
             self.get_elems(xs),
             axis=self.time_axis,
         )
 
-    def get_cell(self, name: str | None = None) -> hk.RNNCore:
-        cell = self.inner_cell(self.hidden_size, name=name)
-        cell_vmap = jax.vmap(cell, in_axes=self.time_axis, out_axes=self.time_axis)
-        return cell_vmap
+    def get_cell(self) -> hk.RNNCore:
+        cells = [
+            jax.vmap(
+                self.cell_class(self.hidden_size),
+                in_axes=self.time_axis,
+                out_axes=self.time_axis,
+            )
+            for _ in range(self.num_layers)
+        ]
 
-    def get_op(self):
-        cell = self.get_cell("cell")
+        def cell(l, r):
+            # Binary cell
+            h, state = cells[0](l, r)
 
-        def op(l, r):
-            return cell(r, l)[1]
+            # Unary cells
+            for unary_layer in range(1, self.num_layers):
+                h, state = cells[unary_layer](state)
 
-        return op
-
-    def get_elems(self, xs):
-        return hk.Linear(self.hidden_size)(xs)
-
-    def scan(self, op, elems, axis):
-        return jax.lax.associative_scan(op, elems, axis=axis)
-
-
-class LSCM(SCM):
-    def get_elems(self, xs):
-        gates = hk.Linear(3 * self.hidden_size)(xs)
-        i, g, o = jnp.split(gates, indices_or_sections=3, axis=-1)
-        c = jnn.sigmoid(i) * jnp.tanh(g)
-        h = jax.nn.sigmoid(o) * jnp.tanh(c)
-
-        return hk.LSTMState(h, c)
-
-    def get_cell(
-        self, name: str | None = None
-    ) -> Callable[[hk.LSTMState, hk.LSTMState], tuple[jax.Array, hk.LSTMState]]:
-        binary_linear = hk.Linear(5 * self.hidden_size)
-        unary_linear = hk.Linear(4 * self.hidden_size)
-
-        def cell(l: hk.LSTMState, r: hk.LSTMState) -> tuple[jax.Array, hk.LSTMState]:
-            gates = binary_linear(jnp.concatenate([l.hidden, r.hidden], axis=-1))
-            i, g, f_l, f_r, o = jnp.split(gates, indices_or_sections=5, axis=-1)
-            f_l = jax.nn.sigmoid(f_l)
-            f_r = jax.nn.sigmoid(f_r)
-            c = f_l * l.cell + f_r * r.cell + jax.nn.sigmoid(i) * jnp.tanh(g)
-            h = jnn.sigmoid(o) * jnn.tanh(c)
-
-            gates = unary_linear(h)
-            i, g, f, o = jnp.split(gates, indices_or_sections=4, axis=-1)
-            f = jax.nn.sigmoid(f)
-            c = f * c + jax.nn.sigmoid(i) * jnp.tanh(g)
-            h = jax.nn.sigmoid(o) * jnp.tanh(c)
-
-            return h, hk.LSTMState(h, c)
+            return state
 
         return cell
 
-    def scan(self, op, elems, axis):
-        return super().scan(op, elems, axis).hidden
+    def get_elems(self, xs):
+        if self.cell_class is NaryLSTM:
+            gates = hk.Linear(3 * self.hidden_size)(xs)
+            i, g, o = jnp.split(gates, indices_or_sections=3, axis=-1)
+            c = jnn.sigmoid(i) * jnp.tanh(g)
+            h = jax.nn.sigmoid(o) * jnp.tanh(c)
+
+            return hk.LSTMState(h, c)
+
+        return hk.Linear(self.hidden_size)(xs)
+
+    def scan(self, cell, elems, axis):
+        states = jax.lax.associative_scan(cell, elems, axis=axis)
+        if isinstance(states, hk.LSTMState):
+            return states.hidden
+        return states
