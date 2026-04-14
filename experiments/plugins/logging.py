@@ -60,7 +60,7 @@ class LoggingPlugin:
             getattr(logging, args["log_level"], logging.WARNING)
         )
 
-        args["save_dir"].mkdir(exist_ok=True)
+        args["save_dir"].mkdir(parents=True, exist_ok=True)
 
     @hookimpl(wrapper=True)
     def run(self, config: dict):

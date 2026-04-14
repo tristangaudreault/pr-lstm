@@ -46,7 +46,7 @@ class SpeedPlugin:
 
         pd.DataFrame(self.data, columns=["length", "time"]).to_csv(
             config["save_dir"]
-            / Path(f"{config["task_name"]}-{config["model_name"]}-speed.dat"),
+            / Path(f"{config["task_name"]}-{config["model_name"]}-speed-{config["test_batch_size"]}.dat"),
             sep=" ",
             index=False,
         )
