@@ -1,8 +1,11 @@
 from dotenv import load_dotenv
 import logging
 import argparse
+import os
 
 import plugin_manager
+
+os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.95"
 
 load_dotenv(override=True)
 logger = logging.getLogger("thesis." + __name__)

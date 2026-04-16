@@ -27,14 +27,16 @@ class SpeedPlugin:
         end_time = time.perf_counter()
         total_time = end_time - start_time
         average_time_ms = (total_time / ITERATIONS) * 1000
+        mem = jax.devices()[0].memory_stats()["peak_bytes_in_use"] / 1e9
 
         logger.debug(
-            "Length %d speed test timed %.2fms per iteration, %.2fs total",
+            "Length %d speed test timed %.2fms per iteration, %.2fs total, %.2fGB",
             log_data["test/length"],
             average_time_ms,
             total_time,
+            mem,
         )
-        self.data.append((log_data["test/length"], average_time_ms))
+        self.data.append((log_data["test/length"], average_time_ms, mem))
 
         return average_time_ms > THRESHOLD
 
@@ -44,9 +46,11 @@ class SpeedPlugin:
 
         results = yield
 
-        pd.DataFrame(self.data, columns=["length", "time"]).to_csv(
+        pd.DataFrame(self.data, columns=["length", "time", "peak_mem"]).to_csv(
             config["save_dir"]
-            / Path(f"{config["task_name"]}-{config["model_name"]}-speed-{config["test_batch_size"]}.dat"),
+            / Path(
+                f"{config["task_name"]}-{config["model_name"]}-speed-{config["test_batch_size"]}.dat"
+            ),
             sep=" ",
             index=False,
         )
