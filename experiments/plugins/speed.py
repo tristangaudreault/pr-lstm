@@ -16,8 +16,8 @@ class SpeedPlugin:
 
     @hookimpl
     def test_log(self, log_data: dict, outputs, batch, apply_fn, params):
-        ITERATIONS = 32
-        THRESHOLD = 300
+        ITERATIONS = 100
+        THRESHOLD = 500
         key = jax.random.PRNGKey(0)
         keys = jax.random.split(key, ITERATIONS)
 
