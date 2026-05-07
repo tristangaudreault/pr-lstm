@@ -51,7 +51,7 @@ def _filter_kwargs(model_builder: Callable, kwargs: dict) -> dict:
 
 def _make_model(
     output_size: int,
-    inner_core: type[thesis.model.NTR],
+    inner_core: type[thesis.model.ParallelRecursive],
     return_all_outputs: bool = False,
     input_window: int = 1,
     **model_kwargs: Any,
@@ -73,7 +73,7 @@ def _make_model(
 nnch.constants.MODEL_BUILDERS.update(
     {
         "gru": partial(nnch.rnn.make_rnn, rnn_core=hk.GRU),
-        "ntr": partial(_make_model, inner_core=thesis.model.NTR),
+        "parallel_recursive": partial(_make_model, inner_core=thesis.model.ParallelRecursive),
     }
 )
 
@@ -219,7 +219,7 @@ class NNCHPlugin:
         parser.add_argument(
             "--cell-name",
             type=str,
-            choices=list(thesis.model.NTR.CELL_MAP.keys()),
+            choices=list(thesis.model.ParallelRecursive.CELL_MAP.keys()),
             default="lstm",
             help="Inner cell architecture for circuited models.",
         )
@@ -227,7 +227,7 @@ class NNCHPlugin:
             "--num-layers",
             type=int,
             default=2,
-            help="Number of layers in NTR encoder.",
+            help="Number of layers in the parallel recursive encoder.",
         )
 
     @hookimpl

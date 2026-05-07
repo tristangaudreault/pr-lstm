@@ -12,7 +12,7 @@ from .nary_cells import NaryLSTM, NaryRNN
 logger = logging.getLogger(__name__)
 
 
-class NTR(hk.Module):
+class ParallelRecursive(hk.Module):
     CELL_MAP = {
         "gru": hk.GRU,
         "rnn": NaryRNN,
