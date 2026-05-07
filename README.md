@@ -2,6 +2,10 @@
 
 This repository contains the code used for the experiments in the paper.
 
+## Environment
+
+The experiments were run on Windows Subsystem for Linux (WSL) using Python 3.12, JAX, and CUDA 12. GPU acceleration is recommended for the main experimental runs.
+
 ## Installation
 ```shell
 pip install .
