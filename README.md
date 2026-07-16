@@ -8,7 +8,7 @@ The experiments were run on Windows Subsystem for Linux (WSL) using Python 3.12,
 
 ## Installation
 ```shell
-pip install .
+uv sync --index pytorch-nightly-cu126 --prerelease allow
 ```
 
 ## Experiments

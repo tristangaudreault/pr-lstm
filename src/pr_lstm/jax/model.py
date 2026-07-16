@@ -6,7 +6,7 @@ import jax.numpy as jnp
 import jax.nn as jnn
 import haiku as hk
 
-from .nary_cells import NaryLSTM, NaryRNN
+from .layers import NaryLSTM, NaryRNN
 
 
 logger = logging.getLogger(__name__)

@@ -16,11 +16,11 @@ import jax.numpy as jnp
 import jax.nn as jnn
 
 from external import nnch
-import thesis
+import pr_lstm
 import utils
 from hooks import hookimpl
 
-logger = logging.getLogger("thesis." + __name__)
+logger = logging.getLogger("pr_lstm." + __name__)
 
 
 def _filter_kwargs(model_builder: Callable, kwargs: dict) -> dict:
@@ -51,7 +51,7 @@ def _filter_kwargs(model_builder: Callable, kwargs: dict) -> dict:
 
 def _make_model(
     output_size: int,
-    inner_core: type[thesis.model.ParallelRecursive],
+    inner_core: type[pr_lstm.model.ParallelRecursive],
     return_all_outputs: bool = False,
     input_window: int = 1,
     **model_kwargs: Any,
@@ -73,7 +73,7 @@ def _make_model(
 nnch.constants.MODEL_BUILDERS.update(
     {
         "gru": partial(nnch.rnn.make_rnn, rnn_core=hk.GRU),
-        "parallel_recursive": partial(_make_model, inner_core=thesis.model.ParallelRecursive),
+        "parallel_recursive": partial(_make_model, inner_core=pr_lstm.model.ParallelRecursive),
     }
 )
 
@@ -87,6 +87,7 @@ def preprocess_path(path, config):
 
 
 class NNCHPlugin:
+    toggle_name = "nnch"
     @hookimpl
     def add_cli_args(self, parser: argparse.ArgumentParser):
         # Experiment
@@ -219,7 +220,7 @@ class NNCHPlugin:
         parser.add_argument(
             "--cell-name",
             type=str,
-            choices=list(thesis.model.ParallelRecursive.CELL_MAP.keys()),
+            choices=list(pr_lstm.model.ParallelRecursive.CELL_MAP.keys()),
             default="lstm",
             help="Inner cell architecture for circuited models.",
         )

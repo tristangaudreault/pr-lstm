@@ -8,7 +8,7 @@ import plugin_manager
 os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.95"
 
 load_dotenv(override=True)
-logger = logging.getLogger("thesis." + __name__)
+logger = logging.getLogger("pr_lstm." + __name__)
 
 
 def main(args: dict | None = None):

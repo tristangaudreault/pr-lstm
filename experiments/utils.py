@@ -5,7 +5,7 @@ import logging
 
 import pandas as pd
 
-logger = logging.getLogger("thesis." + __name__)
+logger = logging.getLogger("pr_lstm." + __name__)
 
 
 class log_context(ContextDecorator):

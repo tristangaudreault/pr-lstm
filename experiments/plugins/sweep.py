@@ -7,7 +7,7 @@ import json
 from hooks import hookimpl
 
 
-logger = logging.getLogger("thesis." + __name__)
+logger = logging.getLogger("pr_lstm." + __name__)
 
 
 class SweepPlugin:

@@ -11,7 +11,7 @@ import utils
 
 import pandas as pd
 
-logger = logging.getLogger("thesis." + __name__)
+logger = logging.getLogger("pr_lstm." + __name__)
 
 
 def round_metrics(metrics: dict[str, float]):
@@ -56,7 +56,7 @@ class LoggingPlugin:
     @hookimpl
     def handle_cli_args(self, args: dict):
         logging.basicConfig(filename=args["log_file"], level=logging.WARNING)
-        logging.getLogger("thesis").setLevel(
+        logging.getLogger("pr_lstm").setLevel(
             getattr(logging, args["log_level"], logging.WARNING)
         )
 

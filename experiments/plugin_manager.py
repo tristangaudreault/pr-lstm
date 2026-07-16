@@ -6,7 +6,7 @@ import pluggy
 import hooks
 import plugins
 
-logger = logging.getLogger("thesis." + __name__)
+logger = logging.getLogger("pr_lstm." + __name__)
 
 
 def get_pm():
@@ -26,6 +26,7 @@ def get_pm():
         )
     )
     pm.register(plugins.NNCHPlugin())
+    pm.register(plugins.HuggingFacePlugin())
     pm.register(plugins.LoggingPlugin())
     pm.register(plugins.SweepPlugin())
     pm.register(plugins.TogglePlugin())
