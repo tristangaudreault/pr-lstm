@@ -40,7 +40,8 @@ torch = [
     "triton",
     "transformers[torch]",
     "datasets",
-    "s5-pytorch"
+    "s5-pytorch",
+    "tensorboard>=2.21.0",
 ]
 
 jax = [

@@ -27,6 +27,28 @@
                 "-K",
                 "8"
             ],
+        },
+        {
+            "name": "Huggingface",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "experiments/huggingface.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--model",
+                "${input:model}",
+                "--hidden-size",
+                "512"
+            ],
+        }
+    ],
+    "inputs": [
+        {
+            "id": "model",
+            "type": "pickString",
+            "description": "Model class name",
+            "options": ["pr", "gpt2", "lstm"],
+            "default": "pr"
         }
     ]
 }

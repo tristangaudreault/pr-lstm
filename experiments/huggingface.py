@@ -1,50 +1,94 @@
-from typing import cast
+import argparse
 
-from datasets import load_dataset, DatasetDict
+from datasets import load_dataset
 from transformers import (
     AutoTokenizer,
     Trainer,
     TrainingArguments,
-    DataCollatorForLanguageModeling,
 )
 
-from pr_lstm.torch.model import ParallelRecursive
+import lm
 
+from tag_utils import branch
+
+SEQ_LEN = 512
+TOKENS_TARGET = 100_000_000
+BATCH_SIZE = 16
+
+steps = TOKENS_TARGET // (SEQ_LEN * BATCH_SIZE)
+
+
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    "--hidden-size",
+    type=int,
+    help="Hidden size.",
+    nargs="+",
+)
+parser.add_argument(
+    "--count-params",
+    action="store_true",
+    help="Prints parameter count and exits before training",
+)
+parser.add_argument("--model", help="Name of model class")
+args = parser.parse_args()
+
+
+model = getattr(lm, args.model)
 
 tokenizer = AutoTokenizer.from_pretrained("gpt2")
 tokenizer.pad_token = tokenizer.eos_token
 
-dataset = cast(DatasetDict, load_dataset("Salesforce/wikitext", "wikitext-103-v1"))
 
-
-def tokenize(example):
+def tokenize(batch):
     return tokenizer(
-        example["text"],
-        truncation=True,
-        max_length=512,
+        batch["text"],
+        add_special_tokens=False,
     )
 
 
-dataset = dataset.map(tokenize, batched=True, remove_columns=["text"], load_from_cache_file=True)
+dataset = load_dataset("Salesforce/wikitext", "wikitext-103-v1")
+tokenized = dataset.map(tokenize, batched=True, remove_columns=["text"])
 
-data_collator = DataCollatorForLanguageModeling(
-    tokenizer=tokenizer,
-    mlm=False,
+hidden_size = branch(args.hidden_size)
+model = model(vocab_size=len(tokenizer), hidden_size=hidden_size)
+
+if args.count_params:
+    print(
+        f"Hidden Size: {hidden_size}, Parameter count (M): {sum(p.numel() for p in model.parameters() if p.requires_grad) * 1e-6}"
+    )
+    exit()
+
+
+def group_texts(examples):
+    ids = sum(examples["input_ids"], [])
+
+    ids = ids[: len(ids) // SEQ_LEN * SEQ_LEN]
+
+    return {
+        "input_ids": [ids[i : i + SEQ_LEN] for i in range(0, len(ids), SEQ_LEN)],
+        "labels": [ids[i : i + SEQ_LEN] for i in range(0, len(ids), SEQ_LEN)],
+    }
+
+
+dataset = tokenized.map(
+    group_texts,
+    batched=True,
+    remove_columns=tokenized["train"].column_names,
 )
 
-model = ParallelRecursive(vocab_size=len(tokenizer), hidden_size=256)
 
 training_args = TrainingArguments(
-    output_dir="checkpoints",
-    per_device_train_batch_size=16,
+    output_dir="./out",
+    per_device_train_batch_size=BATCH_SIZE,
     learning_rate=3e-4,
-    num_train_epochs=10,
+    max_steps=steps,
     logging_steps=100,
-    save_steps=1000,
+    save_strategy="no",
     eval_strategy="steps",
     eval_steps=1000,
-    # torch_compile=True,
-    report_to="none",
+    torch_compile=True,
+    report_to="tensorboard",
 )
 
 # Trainer
@@ -53,7 +97,6 @@ trainer = Trainer(
     args=training_args,
     train_dataset=dataset["train"],
     eval_dataset=dataset["validation"],
-    data_collator=data_collator,
 )
 
 trainer.train()

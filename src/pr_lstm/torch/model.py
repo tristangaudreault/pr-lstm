@@ -19,7 +19,7 @@ class InputStateEmbedding(nn.Module):
         return (c, h)
 
 
-class ParallelRecursive(nn.Module):
+class ParallelRecursiveLM(nn.Module):
     def __init__(self, vocab_size, hidden_size):
         super().__init__()
 
@@ -36,7 +36,6 @@ class ParallelRecursive(nn.Module):
         labels=None,
     ):
         batch_size, seq_len = input_ids.size()
-        print(seq_len)
 
         inputs = self.embedding(input_ids)
 
@@ -59,6 +58,8 @@ class ParallelRecursive(nn.Module):
         loss = None
         if labels is not None:
             loss_fn = nn.CrossEntropyLoss()
-            loss = loss_fn(logits.view(-1, logits.size(-1)), labels.view(-1))
+            shift_logits = logits[:, :-1]
+            shift_labels = labels[:, 1:]
+            loss = loss_fn(shift_logits.reshape(-1, logits.size(-1)), shift_labels.reshape(-1))
 
         return {"logits": logits, "loss": loss}
