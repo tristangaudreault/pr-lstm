@@ -5,24 +5,12 @@ build-backend = "hatchling.build"
 [project]
 name = "pr-lstm"
 version = "1.0.0"
-dependencies = [
-  "dotenv",
-  "wandb",
-  "einops",
-  "optax",
-  "tqdm",
-  "typing-extensions",
-  "flax",
-  "pluggy",
-  "sympy",
-  "chex",
-]
 authors = [
   { name = "Tristan Gaudreault", email = "tristan@tristangaudreault.com" },
 ]
-description = "Implementation of the PR-LSTM architecture in dm-haiku."
+description = "PR-LSTM architecture implemented for PyTorch, Huggingface, and JAX."
 readme = "README.md"
-requires-python = "==3.11.15"
+requires-python = ">=3.11,<3.12"
 classifiers = [
   "Programming Language :: Python :: 3",
   "Operating System :: OS Independent",
@@ -35,34 +23,24 @@ Homepage = "https://github.com/tristangaudreault/pr-lstm"
 Issues = "https://github.com/tristangaudreault/pr-lstm/issues"
 
 [project.optional-dependencies]
-torch = [
-    "torch",
-    "triton",
-    "transformers[torch]",
-    "datasets",
-    "s5-pytorch",
-]
+torch = ["torch", "s5-pytorch"]
+
+hf = ["torch", "s5-pytorch", "transformers"]
 
 jax = [
-    "jax[cuda12] ; sys_platform == 'linux'",
-    "jax ; sys_platform != 'linux'",
-    "jaxlib",
-    "dm-haiku",
-    "dm-tree",
-    "einshape @ git+https://github.com/deepmind/einshape",
+  "jax[cuda13] ; sys_platform == 'linux'",
+  "jax ; sys_platform != 'linux'",
+  "dm-haiku",
 ]
 
-dev = [
-    "pytest",
-    "tensorboard>=2.21.0",
-]
+dev = ["pytest", "tensorboard>=2.21.0"]
 
 [tool.hatch.metadata]
 allow-direct-references = true
 
 [tool.uv]
 required-environments = [
-  "sys_platform == 'linux' and platform_machine == 'x86_64'"
+  "sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
 
 [[tool.uv.index]]

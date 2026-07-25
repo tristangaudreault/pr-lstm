@@ -1,13 +1,11 @@
 import logging
-from typing import Callable
 
-import jax
-import jax.numpy as jnp
-import jax.nn as jnn
 import haiku as hk
+import jax
+import jax.nn as jnn
+import jax.numpy as jnp
 
 from .layers import NaryLSTM, NaryRNN
-
 
 logger = logging.getLogger(__name__)
 

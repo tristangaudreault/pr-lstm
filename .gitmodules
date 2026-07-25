@@ -1,3 +1,6 @@
-[submodule "external/neural_networks_chomsky_hierarchy"]
-	path = experiments/external/neural_networks_chomsky_hierarchy
+[submodule "experiments/neural_networks_chomsky_hierarchy"]
+	path = experiments/neural_networks_chomsky_hierarchy
 	url = git@github.com:google-deepmind/neural_networks_chomsky_hierarchy.git
+[submodule "experiments/xlstm"]
+	path = experiments/xlstm
+	url = https://github.com/NX-AI/xlstm.git

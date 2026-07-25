@@ -54,3 +54,7 @@ Finally, the parameter-matched PR-LSTM variant is produced with:
 python experiments/main.py --task-name even_pairs modular_arithmetic parity_check cycle_navigation stack_manipulation reverse_string modular_arithmetic_brackets solve_equation duplicate_string missing_duplicate_string odds_first binary_addition binary_multiplication compute_sqrt bucket_sort --model-name parallel_recursive --hidden-size 137 -M 460 --testing-lengths n+40 --training-steps 1000000 --log-frequency 100000
 ```
 and fetching the logged network scores in the standard output.
+
+# Development notes
+Parameter count sweeps can be performed as follows
+`python experiments/huggingface.py --count-params --hidden-size $(seq 0 10 | awk '{print 2^$1}') | sort -k3 -n`
