@@ -5,7 +5,7 @@ import lm
 from datasets import load_dataset
 from rich import print
 from rich.pretty import pprint
-from tag_utils import branch
+from branch import branch
 from transformers import (
     AutoTokenizer,
     Trainer,
