@@ -1062,6 +1062,7 @@ dependencies = [
 [package.optional-dependencies]
 dev = [
     { name = "pytest" },
+    { name = "tensorboard" },
 ]
 jax = [
     { name = "dm-haiku" },
@@ -1074,7 +1075,6 @@ jax = [
 torch = [
     { name = "datasets" },
     { name = "s5-pytorch" },
-    { name = "tensorboard" },
     { name = "torch", version = "2.14.0.dev20260714+cu126", source = { registry = "https://download.pytorch.org/whl/nightly/cu126" }, marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "torch", version = "2.14.0.dev20260715+cu126", source = { registry = "https://download.pytorch.org/whl/nightly/cu126" }, marker = "platform_machine != 'x86_64' or sys_platform != 'linux'" },
     { name = "transformers", extra = ["torch"] },
@@ -1099,7 +1099,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'" },
     { name = "s5-pytorch", marker = "extra == 'torch'" },
     { name = "sympy" },
-    { name = "tensorboard", marker = "extra == 'torch'", specifier = ">=2.21.0" },
+    { name = "tensorboard", marker = "extra == 'dev'", specifier = ">=2.21.0" },
     { name = "torch", marker = "extra == 'torch'" },
     { name = "tqdm" },
     { name = "transformers", extras = ["torch"], marker = "extra == 'torch'" },

@@ -8,10 +8,6 @@ def gpt2(**kwargs):
     config = GPT2Config(
         vocab_size=kwargs["vocab_size"],
         n_positions=512,
-        n_ctx=512,
-        n_embd=512,
-        n_layer=8,
-        n_head=8,
     )
 
     return GPT2LMHeadModel(config)
@@ -55,8 +51,5 @@ def lstm(**kwargs):
     return LSTMLM(kwargs["vocab_size"], kwargs["hidden_size"])
 
 
-def pr(**kwargs):
+def pr_lstm(**kwargs):
     return ParallelRecursiveLM(kwargs["vocab_size"], kwargs["hidden_size"])
-
-
-MODELS = {"gpt2": gpt2, "lstm": lstm, "pr": pr}

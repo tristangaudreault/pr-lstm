@@ -41,7 +41,6 @@ torch = [
     "transformers[torch]",
     "datasets",
     "s5-pytorch",
-    "tensorboard>=2.21.0",
 ]
 
 jax = [
@@ -55,6 +54,7 @@ jax = [
 
 dev = [
     "pytest",
+    "tensorboard>=2.21.0",
 ]
 
 [tool.hatch.metadata]
