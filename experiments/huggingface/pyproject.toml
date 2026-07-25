@@ -1,9 +1,0 @@
-[project]
-name = "experiment-huggingface"
-version = "0.1.0"
-requires-python = ">=3.11,<3.12"
-
-dependencies = ["pr-lstm[hf]", "datasets", "rich"]
-
-[tool.uv.sources]
-pr-lstm = { path = "../../", editable = true }
