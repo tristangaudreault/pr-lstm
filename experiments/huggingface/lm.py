@@ -1,7 +1,7 @@
-from transformers import GPT2Config, GPT2LMHeadModel
 import torch.nn as nn
+from transformers import GPT2Config, GPT2LMHeadModel
 
-from pr_lstm.torch.model import ParallelRecursiveLM
+from pr_lstm.hf import PRLMConfig, PRLM
 
 
 def gpt2(**kwargs):
@@ -52,4 +52,5 @@ def lstm(**kwargs):
 
 
 def pr_lstm(**kwargs):
-    return ParallelRecursiveLM(kwargs["vocab_size"], kwargs["hidden_size"])
+    config = PRLMConfig(kwargs["vocab_size"], kwargs["hidden_size"])
+    return PRLM(config)

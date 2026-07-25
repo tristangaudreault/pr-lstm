@@ -33,8 +33,6 @@ jax = [
   "dm-haiku",
 ]
 
-dev = ["pytest", "tensorboard>=2.21.0"]
-
 [tool.hatch.metadata]
 allow-direct-references = true
 

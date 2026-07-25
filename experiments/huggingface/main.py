@@ -2,10 +2,10 @@ import argparse
 from pathlib import Path
 
 import lm
+from branch import branch
 from datasets import load_dataset
 from rich import print
 from rich.pretty import pprint
-from branch import branch
 from transformers import (
     AutoTokenizer,
     Trainer,
