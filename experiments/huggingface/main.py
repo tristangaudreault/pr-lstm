@@ -78,7 +78,7 @@ training_args = TrainingArguments(
     save_strategy="no",
     eval_strategy="steps",
     eval_steps=1000,
-    torch_compile=True,
+    # torch_compile=True,
     report_to="tensorboard",
     run_name=f"{args.model}-wt103-{param_count}M-ctx{args.context}",
 )

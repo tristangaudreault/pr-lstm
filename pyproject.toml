@@ -16,16 +16,18 @@ classifiers = [
   "Operating System :: OS Independent",
 ]
 license = "MIT"
-license-files = ["LICEN[CS]E*"]
+
+[project.license-files]
+paths = ["LICENSE"]
 
 [project.urls]
 Homepage = "https://github.com/tristangaudreault/pr-lstm"
 Issues = "https://github.com/tristangaudreault/pr-lstm/issues"
 
 [project.optional-dependencies]
-torch = ["torch>=2.14.0.dev0", "s5-pytorch"]
+torch = ["torch", "s5-pytorch"]
 
-hf = ["torch>=2.14.0.dev0", "triton", "s5-pytorch", "transformers[torch]"]
+hf = ["torch", "s5-pytorch", "transformers[torch]"]
 
 jax = [
   "jax[cuda13] ; sys_platform == 'linux'",
@@ -42,6 +44,11 @@ required-environments = [
 ]
 
 [[tool.uv.index]]
-name = "pytorch-nightly-cu126"
-url = "https://download.pytorch.org/whl/nightly/cu126"
-explicit = false
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu126" }
+torchvision = { index = "pytorch-cu126" }
+torchaudio = { index = "pytorch-cu126" }
