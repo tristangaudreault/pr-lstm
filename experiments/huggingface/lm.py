@@ -7,7 +7,7 @@ from pr_lstm.hf import PRLMConfig, PRLM
 def gpt2(**kwargs):
     config = GPT2Config(
         vocab_size=kwargs["vocab_size"],
-        n_positions=512,
+        n_positions=kwargs["context"],
     )
 
     return GPT2LMHeadModel(config)

@@ -43,10 +43,10 @@ def tokenize(batch):
 dataset = load_dataset("Salesforce/wikitext", "wikitext-103-v1")
 tokenized = dataset.map(tokenize, batched=True, remove_columns=["text"])
 
-model = model(vocab_size=len(tokenizer), hidden_size=args.hidden_size)
+model = model(vocab_size=len(tokenizer), hidden_size=args.hidden_size, context=args.context)
 
 param_count = sum(p.numel() for p in model.parameters() if p.requires_grad) * 1e-6
-print("param_count (M):", param_count)
+print("param_count (M):", round(param_count))
 
 
 def group_texts(examples):
