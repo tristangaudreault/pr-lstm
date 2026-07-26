@@ -68,9 +68,11 @@ dataset = tokenized.map(
     remove_columns=tokenized["train"].column_names,
 )
 
+run_id = f"{args.model}-wt103-{param_count}M-ctx{args.context}"
 
 training_args = TrainingArguments(
     output_dir=args.output_dir,
+    logging_dir=f"runs/{run_id}",
     per_device_train_batch_size=args.batch_size,
     learning_rate=args.learning_rate,
     max_steps=steps,
@@ -80,7 +82,7 @@ training_args = TrainingArguments(
     eval_steps=1000,
     # torch_compile=True,
     report_to="tensorboard",
-    run_name=f"{args.model}-wt103-{param_count}M-ctx{args.context}",
+    run_name=run_id,
 )
 
 # Trainer
