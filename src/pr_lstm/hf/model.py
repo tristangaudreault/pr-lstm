@@ -1,5 +1,3 @@
-# hf/modeling_prlm.py
-
 import torch.nn as nn
 from transformers import PreTrainedModel
 
