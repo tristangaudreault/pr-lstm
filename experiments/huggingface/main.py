@@ -2,7 +2,6 @@ import argparse
 from pathlib import Path
 
 import lm
-from branch import branch
 from datasets import load_dataset
 from rich import print
 from rich.pretty import pprint
@@ -14,7 +13,7 @@ from transformers import (
 
 parser = argparse.ArgumentParser(fromfile_prefix_chars="@")
 parser.add_argument("--model")
-parser.add_argument("--hidden-size", type=int, nargs="+")
+parser.add_argument("--hidden-size", type=int)
 parser.add_argument("--context", "--ctx", type=int, default=512)
 parser.add_argument("--total-tokens", type=int, default=100_000_000)
 parser.add_argument("--batch-size", type=int, default=16)
@@ -44,8 +43,7 @@ def tokenize(batch):
 dataset = load_dataset("Salesforce/wikitext", "wikitext-103-v1")
 tokenized = dataset.map(tokenize, batched=True, remove_columns=["text"])
 
-hidden_size = branch(args.hidden_size)
-model = model(vocab_size=len(tokenizer), hidden_size=hidden_size)
+model = model(vocab_size=len(tokenizer), hidden_size=args.hidden_size)
 
 param_count = sum(p.numel() for p in model.parameters() if p.requires_grad) * 1e-6
 print("param_count (M):", param_count)
