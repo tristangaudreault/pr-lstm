@@ -23,9 +23,9 @@ Homepage = "https://github.com/tristangaudreault/pr-lstm"
 Issues = "https://github.com/tristangaudreault/pr-lstm/issues"
 
 [project.optional-dependencies]
-torch = ["torch", "s5-pytorch"]
+torch = ["torch>=2.14", "s5-pytorch"]
 
-hf = ["torch", "triton", "s5-pytorch", "transformers[torch]"]
+hf = ["torch>=2.14", "triton", "s5-pytorch", "transformers[torch]"]
 
 jax = [
   "jax[cuda13] ; sys_platform == 'linux'",
