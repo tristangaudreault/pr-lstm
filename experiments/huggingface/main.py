@@ -73,8 +73,8 @@ logging_dir = args.output_dir / "runs" / run_id
 os.environ["TENSORBOARD_LOGGING_DIR"] = str(logging_dir)
 
 training_args = TrainingArguments(
-    output_dir=args.output_dir,
-    logging_dir=logging_dir,
+    output_dir=str(args.output_dir),
+    logging_dir=str(logging_dir),
     per_device_train_batch_size=args.batch_size,
     learning_rate=args.learning_rate,
     num_train_epochs=1,
