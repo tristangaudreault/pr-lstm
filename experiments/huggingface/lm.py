@@ -1,16 +1,21 @@
 import torch.nn as nn
-from transformers import GPT2Config, GPT2LMHeadModel
+import transformers
 
 from pr_lstm.hf import PRLMConfig, PRLM
 
 
+def gpt_neo(**kwargs):
+    config = transformers.GPTNeoConfig.from_pretrained("EleutherAI/gpt-neo-1.3B")
+    return transformers.GPTNeoForCausalLM._from_config(config)
+
+
 def gpt2(**kwargs):
-    config = GPT2Config(
+    config = transformers.GPT2Config(
         vocab_size=kwargs["vocab_size"],
         n_positions=kwargs["context"],
     )
 
-    return GPT2LMHeadModel(config)
+    return transformers.GPT2LMHeadModel(config)
 
 
 class LSTMLM(nn.Module):
