@@ -1,4 +1,5 @@
 import argparse
+import os
 from pathlib import Path
 
 import lm
@@ -15,17 +16,14 @@ parser = argparse.ArgumentParser(fromfile_prefix_chars="@")
 parser.add_argument("--model")
 parser.add_argument("--hidden-size", type=int, default=512)
 parser.add_argument("--context", "--ctx", type=int, default=512)
-parser.add_argument("--total-tokens", type=int, default=100_000_000)
+parser.add_argument("--epochs", type=int, default=1)
 parser.add_argument("--batch-size", type=int, default=16)
 parser.add_argument("--learning-rate", "--lr", type=float, default=3e-4)
-parser.add_argument("--output-dir", "--output", "-o", type=Path, default="runs")
+parser.add_argument("--output-dir", "--output", "-o", type=Path, default="./out")
 
 args = parser.parse_args()
 
 pprint(args)
-
-steps = args.total_tokens // (args.context * args.batch_size)
-print("steps:", steps)
 
 model = getattr(lm, args.model)
 
@@ -43,7 +41,9 @@ def tokenize(batch):
 dataset = load_dataset("Salesforce/wikitext", "wikitext-103-v1")
 tokenized = dataset.map(tokenize, batched=True, remove_columns=["text"])
 
-model = model(vocab_size=len(tokenizer), hidden_size=args.hidden_size, context=args.context)
+model = model(
+    vocab_size=len(tokenizer), hidden_size=args.hidden_size, context=args.context
+)
 
 param_count = sum(p.numel() for p in model.parameters() if p.requires_grad) * 1e-6
 print("param_count (M):", round(param_count))
@@ -68,14 +68,16 @@ dataset = tokenized.map(
     remove_columns=tokenized["train"].column_names,
 )
 
-run_id = f"{args.model}-wt103-{round(param_count)}M-ctx{args.context}"
+run_id = f"{args.model}-wt103-{round(param_count)}M-{args.epochs}epochs-ctx{args.context}"
+logging_dir = args.output_dir / "runs" / run_id
+os.environ["TENSORBOARD_LOGGING_DIR"] = str(logging_dir)
 
 training_args = TrainingArguments(
     output_dir=args.output_dir,
-    logging_dir= args.output_dir / run_id,
+    logging_dir=logging_dir,
     per_device_train_batch_size=args.batch_size,
     learning_rate=args.learning_rate,
-    max_steps=steps,
+    num_train_epochs=1,
     logging_steps=100,
     save_strategy="no",
     eval_strategy="steps",
