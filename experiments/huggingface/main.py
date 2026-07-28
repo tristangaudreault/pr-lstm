@@ -13,7 +13,7 @@ from transformers import (
 
 parser = argparse.ArgumentParser(fromfile_prefix_chars="@")
 parser.add_argument("--model")
-parser.add_argument("--hidden-size", type=int)
+parser.add_argument("--hidden-size", type=int, default=512)
 parser.add_argument("--context", "--ctx", type=int, default=512)
 parser.add_argument("--total-tokens", type=int, default=100_000_000)
 parser.add_argument("--batch-size", type=int, default=16)
