@@ -9,10 +9,24 @@ def gpt_neo(**kwargs):
     return transformers.GPTNeoForCausalLM._from_config(config)
 
 
-def gpt2(**kwargs):
+def gpt2_small(**kwargs):
     config = transformers.GPT2Config(
         vocab_size=kwargs["vocab_size"],
         n_positions=kwargs["context"],
+        n_ctx=kwargs["context"],
+    )
+
+    return transformers.GPT2LMHeadModel(config)
+
+def gpt2_medium(**kwargs):
+    config = transformers.GPT2Config(
+        vocab_size=kwargs["vocab_size"],
+        n_positions=kwargs["context"],
+        n_ctx=kwargs["context"],
+
+        n_embd=1024,
+        n_layer=24,
+        n_head=16,
     )
 
     return transformers.GPT2LMHeadModel(config)

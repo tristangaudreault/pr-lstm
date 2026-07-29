@@ -68,21 +68,29 @@ dataset = tokenized.map(
     remove_columns=tokenized["train"].column_names,
 )
 
-run_id = f"{args.model}-wt103-{round(param_count)}M-{args.epochs}epochs-ctx{args.context}"
+run_id = (
+    f"{args.model}-wt103-{round(param_count)}M-{args.epochs}epochs-ctx{args.context}"
+)
 logging_dir = args.output_dir / "runs" / run_id
 os.environ["TENSORBOARD_LOGGING_DIR"] = str(logging_dir)
 
 training_args = TrainingArguments(
     output_dir=str(args.output_dir),
-    logging_dir=str(logging_dir),
     per_device_train_batch_size=args.batch_size,
+    gradient_accumulation_steps=8,
     learning_rate=args.learning_rate,
-    num_train_epochs=1,
+    lr_scheduler_type="cosine",
+    warmup_ratio=0.03,
+    weight_decay=0.1,
+    max_grad_norm=1.0,
+    num_train_epochs=args.epochs,
+    bf16=True,
     logging_steps=100,
-    save_strategy="no",
+    logging_first_step=True,
     eval_strategy="steps",
     eval_steps=1000,
-    # torch_compile=True,
+    save_strategy="no",
+    logging_dir=str(logging_dir),
     report_to="tensorboard",
     run_name=run_id,
 )
